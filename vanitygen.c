@@ -31,6 +31,13 @@
 
 #include "pattern.h"
 #include "util.h"
+#include "rmd160.h"
+//#include "sha256.h"
+
+#include <immintrin.h>
+#include <string.h>
+#include <stdlib.h>
+#include <inttypes.h>
 
 const char *version = VANITYGEN_VERSION;
 
@@ -42,12 +49,17 @@ const char *version = VANITYGEN_VERSION;
 void *
 vg_thread_loop(void *arg)
 {
-	unsigned char hash_buf[128];
+	unsigned char hash_buf[128*4]  __attribute__((aligned(16)));;
+	unsigned char hash_buf_transpose[128*4]  __attribute__((aligned(16)));;
+	// it seems like size 128 can be decimated to about 80
 	unsigned char *eckey_buf;
-	unsigned char hash1[32];
+	unsigned char hash1[32*4] __attribute__((aligned(16)));;;
+	unsigned char hash1_transpose[32*4] __attribute__((aligned(16)));;;
+	unsigned char hash2_transpose[32*4] __attribute__((aligned(16)));;;
 
-	int i, c, len, output_interval;
+	int i, j, c, len, output_interval;
 	int hash_len;
+	const step = 4;
 
 	const BN_ULONG rekey_max = 10000000;
 	BN_ULONG npoints, rekey_at, nbatch;
@@ -66,8 +78,20 @@ vg_thread_loop(void *arg)
 
 	struct timeval tvstart;
 
+//	const __m128i vm = _mm_setr_epi8(12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3);
+	const __m128i vm = _mm_setr_epi8(3,2,1,0,7,6,5,4,11,10,9,8,15,14,13,12);
+
+	uint32_t         MDbuf[8 * 4]  __attribute__((aligned(16)));
+	uint32_t         MDbuf_transpose[8 * 4]  __attribute__((aligned(16)));
+    __m128i 		 *MDbufPtr = (__m128i*) MDbuf;
+    unsigned char    *MDBufChar = (unsigned char*) MDbuf;
+    BN_CTX           *ctx_buffer[4];
+
+	//	dword         MDBufByte[5] __attribute__((aligned(16)));
 
 	memset(&ctx, 0, sizeof(ctx));
+	memset(&hash_buf, 0, 4*128);
+	memset(&hash2_transpose,0,4*32);
 	vxcp = &ctx;
 
 	vg_exec_context_init(vcp, &ctx);
@@ -104,11 +128,13 @@ vg_thread_loop(void *arg)
 	gettimeofday(&tvstart, NULL);
 
 	if (vcp->vc_format == VCF_SCRIPT) {
-		hash_buf[ 0] = 0x51;  // OP_1
-		hash_buf[ 1] = 0x41;  // pubkey length
-		// gap for pubkey
-		hash_buf[67] = 0x51;  // OP_1
-		hash_buf[68] = 0xae;  // OP_CHECKMULTISIG
+		for (j=0;j<4;j++){
+			hash_buf[ 0+j*128] = 0x51;  // OP_1
+			hash_buf[ 1+j*128] = 0x41;  // pubkey length
+			// gap for pubkey
+			hash_buf[67+j*128] = 0x51;  // OP_1
+			hash_buf[68+j*128] = 0xae;  // OP_CHECKMULTISIG
+		}
 		eckey_buf = hash_buf + 2;
 		hash_len = 69;
 
@@ -191,32 +217,73 @@ vg_thread_loop(void *arg)
 
 		EC_POINTs_make_affine(pgroup, nbatch, ppnt, vxcp->vxc_bnctx);
 
-		for (i = 0; i < nbatch; i++, vxcp->vxc_delta++) {
-			/* Hash the public key */
-			len = EC_POINT_point2oct(pgroup, ppnt[i],
-						 POINT_CONVERSION_UNCOMPRESSED,
-						 eckey_buf,
-						 65,
-						 vxcp->vxc_bnctx);
-			assert(len == 65);
-
-			SHA256(hash_buf, hash_len, hash1);
-			RIPEMD160(hash1, sizeof(hash1), &vxcp->vxc_binres[1]);
-
-			switch (test_func(vxcp)) {
-			case 1:
-				npoints = 0;
-				rekey_at = 0;
-				i = nbatch;
-				break;
-			case 2:
-				goto out;
-			default:
-				break;
+		for (i = 0; i < nbatch; i=i+step) {
+			for (j=0; j< step;j++){
+				/* Hash the public key */
+				len = EC_POINT_point2oct(pgroup, ppnt[i+j],
+							 POINT_CONVERSION_UNCOMPRESSED,
+							 eckey_buf+(j*128),
+							 65,
+//							 ctx_buffer[j]);
+							 vxcp->vxc_bnctx);
+				assert(len == 65);
+				vxcp->vxc_delta++;
 			}
-		}
+			for (j=0; j< step;j++){
+				SHA256(hash_buf+(j*128), hash_len, hash1+(j*32));
+			}
+//			sha256_init(hash2_transpose);
+//			sha256_transform(hash2_transpose,hash_buf,1,65);
+			if (step==1){
+//				RIPEMD160(hash1, sizeof(hash1)/4, &vxcp->vxc_binres[1]);
+				MDinit(MDbuf);
+				MDfinish(MDbuf, hash1, sizeof(hash1)/4, 0);
+			}else{
+#if 0
+				MDinit(MDbuf);
+				MDfinish(MDbuf, hash1, sizeof(hash1)/4, 0);
+				MDinit(MDbuf+8);
+				MDfinish(MDbuf+8, hash1+32, sizeof(hash1)/4, 0);
+				MDinit(MDbuf+16);
+				MDfinish(MDbuf+16, hash1+64, sizeof(hash1)/4, 0);
+				MDinit(MDbuf+24);
+				MDfinish(MDbuf+24, hash1+96, sizeof(hash1)/4, 0);
+#else
+				MD_matrix_transpose_r2c(hash1,hash1_transpose, 4, 8);
+				_mm_MDinit(MDbuf_transpose);
+				_mm_MDfinish(MDbuf_transpose, hash1_transpose, sizeof(hash1)/4, 0);
+				MD_matrix_transpose_c2r(MDbuf_transpose, MDbuf, 8, 4);
+#endif
+//				MDbufPtr[0] = _mm_shuffle_epi8(MDbufPtr[0],vm);
+//				MDbufPtr[1] = _mm_shuffle_epi8(MDbufPtr[1],vm);
+//				MDbufPtr[2] = _mm_shuffle_epi8(MDbufPtr[2],vm);
+//				MDbufPtr[3] = _mm_shuffle_epi8(MDbufPtr[3],vm);
+//				MDbufPtr[4] = _mm_shuffle_epi8(MDbufPtr[4],vm);
+			}
+			vxcp->vxc_delta=vxcp->vxc_delta-step;
+		    for (j=0;j<step;j++){
+	    		memcpy(vxcp->vxc_binres+1,MDBufChar+j*32,20);
+//	    		vxcp->vxc_bnctx = ctx_buffer[j];
+		    	switch (test_func(vxcp)) {
+					case 1:
+						npoints = 0;
+						rekey_at = 0;
+						i = nbatch;
+						break;
+					case 2:
+						goto out;
+					default:
+						break;
+				}
+			    vxcp->vxc_delta++;
 
-		c += i;
+//		    for (j = 0; j<20; j++)
+//		    	vxcp->vxc_binres[j+1] = MDBufChar[j];
+		    }
+		}
+		j=0;
+//		for(j=0;j<step;j++)
+			c += i + j;
 		if (c >= output_interval) {
 			output_interval = vg_output_timing(vcp, c, &tvstart);
 			if (output_interval > 250000)
@@ -228,8 +295,10 @@ vg_thread_loop(void *arg)
 	}
 
 out:
+
 	vg_exec_context_del(&ctx);
 	vg_context_thread_exit(vcp);
+
 
 	for (i = 0; i < ptarraysize; i++)
 		if (ppnt[i])
