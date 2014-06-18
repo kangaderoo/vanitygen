@@ -114,12 +114,17 @@ void MDinit(dword *MDbuf);
  *  initializes MDbuffer to "magic constants"
  */
 
+void MM_MDinit(uint32_t *MDbuf);
+/*
+ *  initializes MDbuffer to "magic constants"
+ */
+
 void compress(dword *MDbuf, dword *X);
 /*
  *  the compression function.
  *  transforms MDbuf using message bytes X[0] through X[15]
  */
-void _mm_compress(__m128i *MDbuf, __m128i *X);
+void MM_compress(__m128i *MDbuf, __m128i *X);
 
 void MDfinish(dword *MDbuf, byte *strptr, dword lswlen, dword mswlen);
 /*
@@ -128,15 +133,15 @@ void MDfinish(dword *MDbuf, byte *strptr, dword lswlen, dword mswlen);
  *  note: length in bits == 8 * (lswlen + 2^32 mswlen).
  *  note: there are (lswlen mod 64) bytes left in strptr.
  */
-void _mm_MDfinish(__m128i *MDbuf, __m128i *strptr, dword lswlen, dword mswlen);
+void MM_MDfinish(__m128i *MDbuf, __m128i *strptr, dword lswlen, dword mswlen);
 
 
-void MD_matrix_transpose_r2c(__m128i* inbuf,__m128i* outbuf, uint32_t rows, uint32_t colums);
+void MM_matrix_transpose_r2c(__m128i* inbuf,__m128i* outbuf, uint32_t rows, uint32_t colums);
 /*
  * uses uint32_t array as input and transposes the rows to colunms
  */
 
-void MD_matrix_transpose_c2r(__m128i* inbuf,__m128i* outbuf, uint32_t rows, uint32_t colums);
+void MM_matrix_transpose_c2r(__m128i* inbuf,__m128i* outbuf, uint32_t rows, uint32_t colums);
 /*
  * uses uint32_t array as input and transposes the columns to rows
  */

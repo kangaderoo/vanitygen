@@ -35,7 +35,7 @@ void MDinit(dword *MDbuf)
    return;
 }
 
-void _mm_MDinit(uint32_t *MDbuf)
+void MM_MDinit(uint32_t *MDbuf)
 {
    MDbuf[0] = 0x67452301UL;
    MDbuf[4] = 0xefcdab89UL;
@@ -368,7 +368,7 @@ void compress(dword *MDbuf, dword *X)
    return;
 }
 
-void _mm_compress(__m128i *MDbuf, __m128i *X)
+void MM_compress(__m128i *MDbuf, __m128i *X)
 {
    __m128i aa = MDbuf[0],  bb = MDbuf[1],  cc = MDbuf[2],
          dd = MDbuf[3],  ee = MDbuf[4];
@@ -569,7 +569,7 @@ void _mm_compress(__m128i *MDbuf, __m128i *X)
 
 /********************************************************************/
 
-void _mm_MDfinish(__m128i *MDbuf, __m128i *strptr, dword lswlen, dword mswlen)
+void MM_MDfinish(__m128i *MDbuf, __m128i *strptr, dword lswlen, dword mswlen)
 {
    unsigned int i;                                 /* counter       */
    uint32_t        X[16 * 4];                      /* message words */
@@ -605,7 +605,7 @@ void _mm_MDfinish(__m128i *MDbuf, __m128i *strptr, dword lswlen, dword mswlen)
 
 //   X[14] = lswlen << 3;
 //  X[15] = (lswlen >> 29) | (mswlen << 3);
-   _mm_compress(MDbuf, XPrt);
+   MM_compress(MDbuf, XPrt);
 
    return;
 }
@@ -641,7 +641,7 @@ void MDfinish(dword *MDbuf, byte *strptr, dword lswlen, dword mswlen)
    return;
 }
 
-void MD_matrix_transpose_r2c(__m128i* inbuf,__m128i* outbuf, uint32_t rows, uint32_t colums)
+void MM_matrix_transpose_r2c(__m128i* inbuf,__m128i* outbuf, uint32_t rows, uint32_t colums)
 {
 	// this matrix transpose changes rows in to colums using block modes
 	__m128i block[4];
@@ -663,7 +663,7 @@ void MD_matrix_transpose_r2c(__m128i* inbuf,__m128i* outbuf, uint32_t rows, uint
 
 }
 
-void MD_matrix_transpose_c2r(__m128i* inbuf,__m128i* outbuf, uint32_t rows, uint32_t colums)
+void MM_matrix_transpose_c2r(__m128i* inbuf,__m128i* outbuf, uint32_t rows, uint32_t colums)
 {
 	// this matrix transpose changes rows in to colums using block modes
 	__m128i block[4];
