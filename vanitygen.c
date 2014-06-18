@@ -32,7 +32,7 @@
 #include "pattern.h"
 #include "util.h"
 #include "rmd160.h"
-//#include "sha256.h"
+#include "sha256.h"
 
 #include <immintrin.h>
 #include <string.h>
@@ -49,13 +49,15 @@ const char *version = VANITYGEN_VERSION;
 void *
 vg_thread_loop(void *arg)
 {
-	unsigned char hash_buf[128*4]  __attribute__((aligned(16)));;
-	unsigned char hash_buf_transpose[128*4]  __attribute__((aligned(16)));;
-	// it seems like size 128 can be decimated to about 80
+	unsigned char hash_buf[128*4]  				__attribute__((aligned(16)));;
+	unsigned char hash_buf_transpose[128*4]  	__attribute__((aligned(16)));;
+	// keep the size 128, in order to maintain the SHA256 512 bits per chunk
+	uint32_t *sha256lenPtr = &hash_buf;
 	unsigned char *eckey_buf;
-	unsigned char hash1[32*4] __attribute__((aligned(16)));;;
-	unsigned char hash1_transpose[32*4] __attribute__((aligned(16)));;;
-	unsigned char hash2_transpose[32*4] __attribute__((aligned(16)));;;
+	unsigned char hash1[32*4] 					__attribute__((aligned(16)));;;
+	unsigned char hash2[32*4] 					__attribute__((aligned(16)));;;
+	unsigned char hash1_transpose[32*4] 		__attribute__((aligned(16)));;;
+	unsigned char hash2_transpose[32*4] 		__attribute__((aligned(16)));;;
 
 	int i, j, c, len, output_interval;
 	int hash_len;
@@ -79,19 +81,21 @@ vg_thread_loop(void *arg)
 	struct timeval tvstart;
 
 //	const __m128i vm = _mm_setr_epi8(12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3);
-	const __m128i vm = _mm_setr_epi8(3,2,1,0,7,6,5,4,11,10,9,8,15,14,13,12);
+//	const __m128i vm = _mm_setr_epi8(3,2,1,0,7,6,5,4,11,10,9,8,15,14,13,12);
 
 	uint32_t         MDbuf[8 * 4]  __attribute__((aligned(16)));
 	uint32_t         MDbuf_transpose[8 * 4]  __attribute__((aligned(16)));
-    __m128i 		 *MDbufPtr = (__m128i*) MDbuf;
+//    __m128i 		 *MDbufPtr = (__m128i*) MDbuf;
     unsigned char    *MDBufChar = (unsigned char*) MDbuf;
-    BN_CTX           *ctx_buffer[4];
+//    BN_CTX           *ctx_buffer[4];
 
 	//	dword         MDBufByte[5] __attribute__((aligned(16)));
 
-	memset(&ctx, 0, sizeof(ctx));
-	memset(&hash_buf, 0, 4*128);
-	memset(&hash2_transpose,0,4*32);
+	memset(&ctx,                0, sizeof(ctx));
+	memset(&hash_buf,           0, 4*128);
+	memset(&hash_buf_transpose, 0, 4*128);
+	memset(&hash2_transpose,    0 ,4*32);
+
 	vxcp = &ctx;
 
 	vg_exec_context_init(vcp, &ctx);
@@ -229,13 +233,36 @@ vg_thread_loop(void *arg)
 				assert(len == 65);
 				vxcp->vxc_delta++;
 			}
+
+#if 0
 			for (j=0; j< step;j++){
 				SHA256(hash_buf+(j*128), hash_len, hash1+(j*32));
 			}
-//			sha256_init(hash2_transpose);
-//			sha256_transform(hash2_transpose,hash_buf,1,65);
+#else
+			for (j=0; j< step;j++){
+				// hash_len is 65 or 69 length, so for SHA256 always two chunks
+				// so the SHA prepare is here; add "1" and length are inserted in the buffer
+				hash_buf[hash_len+(j*128)]= 0x80;
+				sha256lenPtr[30+j*32] = (hash_len >> 29);
+				sha256lenPtr[31+j*32] =	hash_len << 3;
+			}
+			// transpose the hash_buf from row to column
+			MM_matrix_transpose_r2c(hash_buf,hash_buf_transpose, 4, 32);
+			// Big/small endian recoding
+			// don't use 32, the last two positions hold the length, already formatted correctly.
+			// since the buffer also contains 0's minimal = 18 (69/4)+1, big endians of 0 are still 0
+			MM_beRecode(hash_buf_transpose,30);
+			// init the hash
+			MM_sha256_init(hash1);
+			// run transform first chunk
+			MM_sha256_transform(hash1, hash_buf_transpose);
+			// run transform 2nd chunk
+			MM_sha256_transform(hash1, hash_buf_transpose+256);
+			// Big/small endian recoding
+			MM_beRecode(hash1,16);
+
+#endif
 			if (step==1){
-//				RIPEMD160(hash1, sizeof(hash1)/4, &vxcp->vxc_binres[1]);
 				MDinit(MDbuf);
 				MDfinish(MDbuf, hash1, sizeof(hash1)/4, 0);
 			}else{
@@ -249,26 +276,22 @@ vg_thread_loop(void *arg)
 				MDinit(MDbuf+24);
 				MDfinish(MDbuf+24, hash1+96, sizeof(hash1)/4, 0);
 #else
-				MD_matrix_transpose_r2c(hash1,hash1_transpose, 4, 8);
-				_mm_MDinit(MDbuf_transpose);
-				_mm_MDfinish(MDbuf_transpose, hash1_transpose, sizeof(hash1)/4, 0);
-				MD_matrix_transpose_c2r(MDbuf_transpose, MDbuf, 8, 4);
+//				MD_matrix_transpose_r2c(hash1,hash1_transpose, 4, 8);
+				MM_MDinit(MDbuf_transpose);
+//				_mm_MDfinish(MDbuf_transpose, hash1_transpose /*hash1*/, sizeof(hash1)/4, 0);
+				MM_MDfinish(MDbuf_transpose, hash1 /*hash1_transpose*/, sizeof(hash2)/4, 0);
+				MM_matrix_transpose_c2r(MDbuf_transpose, MDbuf, 8, 4);
 #endif
-//				MDbufPtr[0] = _mm_shuffle_epi8(MDbufPtr[0],vm);
-//				MDbufPtr[1] = _mm_shuffle_epi8(MDbufPtr[1],vm);
-//				MDbufPtr[2] = _mm_shuffle_epi8(MDbufPtr[2],vm);
-//				MDbufPtr[3] = _mm_shuffle_epi8(MDbufPtr[3],vm);
-//				MDbufPtr[4] = _mm_shuffle_epi8(MDbufPtr[4],vm);
 			}
 			vxcp->vxc_delta=vxcp->vxc_delta-step;
 		    for (j=0;j<step;j++){
 	    		memcpy(vxcp->vxc_binres+1,MDBufChar+j*32,20);
-//	    		vxcp->vxc_bnctx = ctx_buffer[j];
 		    	switch (test_func(vxcp)) {
 					case 1:
 						npoints = 0;
 						rekey_at = 0;
 						i = nbatch;
+						j = step;
 						break;
 					case 2:
 						goto out;
@@ -276,14 +299,9 @@ vg_thread_loop(void *arg)
 						break;
 				}
 			    vxcp->vxc_delta++;
-
-//		    for (j = 0; j<20; j++)
-//		    	vxcp->vxc_binres[j+1] = MDBufChar[j];
 		    }
 		}
-		j=0;
-//		for(j=0;j<step;j++)
-			c += i + j;
+		c += i;
 		if (c >= output_interval) {
 			output_interval = vg_output_timing(vcp, c, &tvstart);
 			if (output_interval > 250000)
