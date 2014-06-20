@@ -575,11 +575,12 @@ void MM_MDfinish(__m128i *MDbuf, __m128i *strptr, dword lswlen, dword mswlen)
    uint32_t        X[16 * 4];                      /* message words */
    __m128i *XPrt = (__m128i*) X;
 //	const __m128i vm = _mm_setr_epi8(3,2,1,0,7,6,5,4,11,10,9,8,15,14,13,12);
-	const __m128i vm = _mm_setr_epi8(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15);
+//	const __m128i vm = _mm_setr_epi8(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15);
 
    memset(X, 0, 16*4*sizeof(dword));
    for (i=0; i<((lswlen/4)&15); i++) {
-	   XPrt[i] = _mm_shuffle_epi8(strptr[i],vm);
+//	   XPrt[i] = _mm_shuffle_epi8(strptr[i],vm);
+	   XPrt[i] = strptr[i];
    }
 
 //   /* put bytes from strptr into X */
@@ -592,7 +593,8 @@ void MM_MDfinish(__m128i *MDbuf, __m128i *strptr, dword lswlen, dword mswlen)
 //   X[(lswlen>>2)&15] ^= (dword)1 << (8*(lswlen&3) + 7);
    XPrt[(lswlen>>2)&15] ^= _mm_set1_epi32 ((uint32_t) 1<<(8*(lswlen&3) + 7));
 
-//   this section still needs to be converted/added --> GDR
+//   this section still needs to be converted/added for real rnd160--> GDR
+//   but since the size is known here, this step is not performed.
 //   if ((lswlen & 63) > 55) {
 //      /* length goes to next block */
 //      compress(MDbuf, X);
