@@ -144,7 +144,7 @@ vg_thread_loop(void *arg)
 
 	} else {
 		eckey_buf = hash_buf;
-		hash_len = 65;
+		hash_len = (vcp->vc_compressed)?33:65;
 	}
 
 	while (!vcp->vc_halt) {
@@ -225,12 +225,12 @@ vg_thread_loop(void *arg)
 			for (j=0; j< step;j++){
 				/* Hash the public key */
 				len = EC_POINT_point2oct(pgroup, ppnt[i+j],
-							 POINT_CONVERSION_UNCOMPRESSED,
+							 (vcp->vc_compressed)?POINT_CONVERSION_COMPRESSED:POINT_CONVERSION_UNCOMPRESSED,
 							 eckey_buf+(j*128),
-							 65,
-//							 ctx_buffer[j]);
+							 (vcp->vc_compressed)?33:65,
+
 							 vxcp->vxc_bnctx);
-				assert(len == 65);
+				assert(len == 65 || len == 33);
 				vxcp->vxc_delta++;
 			}
 
@@ -242,22 +242,33 @@ vg_thread_loop(void *arg)
 			for (j=0; j< step;j++){
 				// hash_len is 65 or 69 length, so for SHA256 always two chunks
 				// so the SHA prepare is here; add "1" and length are inserted in the buffer
-				hash_buf[hash_len+(j*128)]= 0x80;
-				sha256lenPtr[30+j*32] = (hash_len >> 29);
-				sha256lenPtr[31+j*32] =	hash_len << 3;
+				if (vcp->vc_compressed){
+					// compressed haslen is 33 only one chunk.
+					hash_buf[hash_len+(j*128)]= 0x80;
+					sha256lenPtr[14+j*32] = (hash_len >> 29);
+					sha256lenPtr[15+j*32] =	hash_len << 3;
+				}else{
+					hash_buf[hash_len+(j*128)]= 0x80;
+					sha256lenPtr[30+j*32] = (hash_len >> 29);
+					sha256lenPtr[31+j*32] =	hash_len << 3;
+				}
 			}
 			// transpose the hash_buf from row to column
 			MM_matrix_transpose_r2c(hash_buf,hash_buf_transpose, 4, 32);
 			// Big/small endian recoding
 			// don't use 32, the last two positions hold the length, already formatted correctly.
 			// since the buffer also contains 0's minimal = 18 (69/4)+1, big endians of 0 are still 0
-			MM_beRecode(hash_buf_transpose,30);
+			if (vcp->vc_compressed)
+				MM_beRecode(hash_buf_transpose,14);
+			else
+				MM_beRecode(hash_buf_transpose,30);
 			// init the hash
 			MM_sha256_init(hash1);
 			// run transform first chunk
 			MM_sha256_transform(hash1, hash_buf_transpose);
 			// run transform 2nd chunk
-			MM_sha256_transform(hash1, hash_buf_transpose+256);
+			if (!(vcp->vc_compressed))
+					MM_sha256_transform(hash1, hash_buf_transpose+256);
 			// Big/small endian recoding
 			MM_beRecode(hash1,16);
 
@@ -301,6 +312,7 @@ vg_thread_loop(void *arg)
 			    vxcp->vxc_delta++;
 		    }
 		}
+
 		c += i;
 		if (c >= output_interval) {
 			output_interval = vg_output_timing(vcp, c, &tvstart);
@@ -398,10 +410,11 @@ usage(const char *name)
 "-i            Case-insensitive prefix search\n"
 "-k            Keep pattern and continue search after finding a match\n"
 "-1            Stop after first match\n"
+"-L            Generate litecoin address\n"
 "-N            Generate namecoin address\n"
 "-T            Generate bitcoin testnet address\n"
 "-X <version>  Generate address with the given version\n"
-"-F <format>   Generate address with the given format (pubkey or script)\n"
+"-F <format>   Generate address with the given format (pubkey, compressed, script)\n"
 "-P <pubkey>   Specify base public key for piecewise key generation\n"
 "-e            Encrypt private keys, prompt for password\n"
 "-E <password> Encrypt private keys with <password> (UNSAFE)\n"
@@ -445,11 +458,15 @@ main(int argc, char **argv)
 	int pattfpi[MAX_FILE];
 	int npattfp = 0;
 	int pattstdin = 0;
+	int compressed = 0;
 
 	int i;
 
-	while ((opt = getopt(argc, argv, "vqnrik1eE:P:NTX:F:t:h?f:o:s:")) != -1) {
+	while ((opt = getopt(argc, argv, "Lvqnrik1eE:P:NTX:F:t:h?f:o:s:")) != -1) {
 		switch (opt) {
+		case 'c':
+		        compressed = 1;
+		        break;
 		case 'v':
 			verbose = 2;
 			break;
@@ -476,6 +493,11 @@ main(int argc, char **argv)
 			privtype = 180;
 			scriptaddrtype = -1;
 			break;
+		case 'L':
+			addrtype = 48;
+			privtype = 176;
+			scriptaddrtype = -1;
+			break;
 		case 'T':
 			addrtype = 111;
 			privtype = 239;
@@ -489,7 +511,10 @@ main(int argc, char **argv)
 		case 'F':
 			if (!strcmp(optarg, "script"))
 				format = VCF_SCRIPT;
-			else
+                        else
+                        if (!strcmp(optarg, "compressed"))
+                                compressed = 1;
+                        else
 			if (strcmp(optarg, "pubkey")) {
 				fprintf(stderr,
 					"Invalid format '%s'\n", optarg);
@@ -631,6 +656,7 @@ main(int argc, char **argv)
 					    caseinsensitive);
 	}
 
+	vcp->vc_compressed = compressed;
 	vcp->vc_verbose = verbose;
 	vcp->vc_result_file = result_file;
 	vcp->vc_remove_on_match = remove_on_match;
