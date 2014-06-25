@@ -29,6 +29,7 @@ usage(const char *progname)
 "-G            Generate a key pair and output the full public key\n"
 "-8            Output key in PKCS#8 form\n"
 "-e            Encrypt output key, prompt for password\n"
+"-X <version>  Generate address with the given version\n"
 "-E <password> Encrypt output key with <password> (UNSAFE)\n"
 "-c <key>      Combine private key parts to make complete private key\n"
 "-v            Verbose output\n",
@@ -52,10 +53,11 @@ main(int argc, char **argv)
 	int pass_prompt = 0;
 	int verbose = 0;
 	int generate = 0;
+	int versionoverride=0;
 	int opt;
 	int res;
 
-	while ((opt = getopt(argc, argv, "8E:ec:vG")) != -1) {
+	while ((opt = getopt(argc, argv, "8E:ec:vGX:")) != -1) {
 		switch (opt) {
 		case '8':
 			pkcs8 = 1;
@@ -86,6 +88,11 @@ main(int argc, char **argv)
 		case 'G':
 			generate = 1;
 			break;
+		case 'X':
+			addrtype = atoi(optarg);
+			privtype = 128 + addrtype;
+			versionoverride = 1;
+			break;
 		default:
 			usage(argv[0]);
 			return 1;
@@ -95,11 +102,17 @@ main(int argc, char **argv)
 	OpenSSL_add_all_algorithms();
 
 	pkey = EC_KEY_new_by_curve_name(NID_secp256k1);
-
+	if (!(versionoverride)){
+		switch (privtype) {
+		case 128: addrtype = 0; break;
+		case 239: addrtype = 111; break;
+		default:  addrtype = 0; break;
+		}
+	}
 	if (generate) {
 		unsigned char *pend = (unsigned char *) pbuf;
-		addrtype = 0;
-		privtype = 128;
+//		addrtype = 0;
+//		privtype = 128;
 		EC_KEY_generate_key(pkey);
 		res = i2o_ECPublicKey(pkey, &pend);
 		fprintf(stderr, "Pubkey (hex): ");
@@ -179,12 +192,6 @@ main(int argc, char **argv)
 		pass_in = pwbuf;
 		if (!vg_check_password_complexity(pwbuf, 1))
 			fprintf(stderr, "WARNING: Using weak password\n");
-	}
-
-	switch (privtype) {
-	case 128: addrtype = 0; break;
-	case 239: addrtype = 111; break;
-	default:  addrtype = 0; break;
 	}
 
 	if (verbose) {
