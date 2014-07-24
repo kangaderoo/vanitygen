@@ -239,7 +239,13 @@ vg_thread_loop(void *arg)
 		for (i = 0; i < nbatch; i=i+step) {
 			for (j=0; j< step;j++){
 				/* Hash the public key */
-				len = EC_POINT_point2oct(pgroup, ppnt[i+j],
+				// BN_bn2bin()
+				// this function does perform a affine check/modify that cannot be bypassed, it is rewritten to
+				// a simpler form., just get the jacobian X and Y, since the group-affine put Z equal 1.
+				// convert the BigNum to octal stream.
+				// Compressed is determined by Y, compressed 02->Y=even 03->Y=odd; 04->uncompressed
+				len = struct_EC_POINT_point2oct(pgroup, ppnt[i+j],
+//    			len = EC_POINT_point2oct(pgroup, ppnt[i+j],
 							 (vcp->vc_compressed)?POINT_CONVERSION_COMPRESSED:POINT_CONVERSION_UNCOMPRESSED,
 							 eckey_buf+(j*128),
 							 (vcp->vc_compressed)?33:65,
