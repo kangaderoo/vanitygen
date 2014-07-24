@@ -7,7 +7,7 @@
 #include <inttypes.h>
 #include "sha256.h"
 
-//#define S0(x)           (ROTR(x, 2) ^ ROTR(x, 13) ^ ROTR(x, 22))
+// #define S0(x)           (ROTR(x, 2) ^ ROTR(x, 13) ^ ROTR(x, 22))
 __m128i funct_S0(const __m128i *x)
 {
         __m128i rot2 = _mm_srli_epi32(*x, 2);
@@ -28,7 +28,7 @@ __m128i funct_S0(const __m128i *x)
         return _calc;
 }
 
-//#define S1(x)           (ROTR(x, 6) ^ ROTR(x, 11) ^ ROTR(x, 25))
+// #define S1(x)           (ROTR(x, 6) ^ ROTR(x, 11) ^ ROTR(x, 25))
 __m128i funct_S1(const __m128i *x)
 {
         __m128i rot6 = _mm_srli_epi32(*x, 6);
@@ -49,18 +49,18 @@ __m128i funct_S1(const __m128i *x)
         return _calc;
 }
 
-//#define s0(x)           (ROTR(x, 7) ^ ROTR(x, 18) ^ (x >> 3))
-__m128i funct_s0(const __m128i x)
+// #define s0(x)           (ROTR(x, 7) ^ ROTR(x, 18) ^ (x >> 3))
+__m128i funct_s0(const __m128i *x)
 {
-        __m128i rot7 = _mm_srli_epi32(x, 7);
-        __m128i rot18 = _mm_srli_epi32(x, 18);
-        __m128i _calc = _mm_slli_epi32(x,(32 - 7));
-        __m128i shift3 = _mm_srli_epi32(x, 3);
+        __m128i rot7 = _mm_srli_epi32(*x, 7);
+        __m128i rot18 = _mm_srli_epi32(*x, 18);
+        __m128i _calc = _mm_slli_epi32(*x,(32 - 7));
+        __m128i shift3 = _mm_srli_epi32(*x, 3);
 
         _calc = _mm_xor_si128(_calc, rot7);
         _calc = _mm_xor_si128(_calc, rot18);
 
-        rot18 = _mm_slli_epi32(x,(32 - 18));
+        rot18 = _mm_slli_epi32(*x,(32 - 18));
         _calc = _mm_xor_si128(_calc, rot18);
 
         _calc = _mm_xor_si128(_calc, shift3);
@@ -68,18 +68,18 @@ __m128i funct_s0(const __m128i x)
         return _calc;
 }
 
-//#define s1(x)           (ROTR(x, 17) ^ ROTR(x, 19) ^ (x >> 10))
-__m128i funct_s1(const __m128i x)
+// #define s1(x)           (ROTR(x, 17) ^ ROTR(x, 19) ^ (x >> 10))
+__m128i funct_s1(const __m128i *x)
 {
-        __m128i rot17 = _mm_srli_epi32(x, 17);
-        __m128i rot19 = _mm_srli_epi32(x, 19);
-        __m128i _calc = _mm_slli_epi32(x,(32 - 17));
-        __m128i shift10 = _mm_srli_epi32(x, 10);
+        __m128i rot17 = _mm_srli_epi32(*x, 17);
+        __m128i rot19 = _mm_srli_epi32(*x, 19);
+        __m128i _calc = _mm_slli_epi32(*x,(32 - 17));
+        __m128i shift10 = _mm_srli_epi32(*x, 10);
 
         _calc = _mm_xor_si128(_calc, rot17);
         _calc = _mm_xor_si128(_calc, rot19);
 
-        rot19 =  _mm_slli_epi32(x,(32 - 19));
+        rot19 =  _mm_slli_epi32(*x,(32 - 19));
         _calc = _mm_xor_si128(_calc, rot19);
 
         _calc = _mm_xor_si128(_calc, shift10);
@@ -116,14 +116,15 @@ __m128i funct_Maj(__m128i *x, __m128i *y, __m128i *z)
 //#define s1(x)           (ROTR(x, 17) ^ ROTR(x, 19) ^ (x >> 10))
 
 /* SHA256 round function */
-//#define RND(a, b, c, d, e, f, g, h, k) \
-//	do { \
-//		t0 = h + S1(e) + Ch(e, f, g) + k; \
-//		t1 = S0(a) + Maj(a, b, c); \
-//		d += t0; \
-//		h  = t0 + t1; \
-//	} while (0)
-
+/*
+ *  #define RND(a, b, c, d, e, f, g, h, k) \
+ *	do { \
+ *		t0 = h + S1(e) + Ch(e, f, g) + k; \
+ *		t1 = S0(a) + Maj(a, b, c); \
+ *		d += t0; \
+ *		h  = t0 + t1; \
+ *	} while (0)
+ */
 void MM_RND(__m128i *a, __m128i *b, __m128i *c, __m128i *d, __m128i *e, __m128i *f, __m128i *g, __m128i *h,
 		          const __m128i k)
 {
@@ -142,13 +143,15 @@ void MM_RND(__m128i *a, __m128i *b, __m128i *c, __m128i *d, __m128i *e, __m128i 
 }
 
 /* Adjusted round function for rotating state */
-//#define RNDr(S, W, i) \
-//	RND(S[(64 - i) % 8], S[(65 - i) % 8], \
-//	    S[(66 - i) % 8], S[(67 - i) % 8], \
-//	    S[(68 - i) % 8], S[(69 - i) % 8], \
-//	    S[(70 - i) % 8], S[(71 - i) % 8], \
-//	    W[i] + sha256_k_sidm[i])
-
+/*
+ *  #define RNDr(S, W, i) \
+ *	RND(S[(64 - i) % 8], S[(65 - i) % 8], \
+ *	    S[(66 - i) % 8], S[(67 - i) % 8], \
+ *	    S[(68 - i) % 8], S[(69 - i) % 8], \
+ *	    S[(70 - i) % 8], S[(71 - i) % 8], \
+ *	    W[i] + sha256_k_sidm[i])
+ *
+ */
 
 void sha256_init(uint32_t *state)
 {
@@ -157,7 +160,19 @@ void sha256_init(uint32_t *state)
 
 void MM_sha256_init(uint32_t *state)
 {
-	memcpy(state, sha256_h_quad, 32*4);
+	__m128i *ConstPrt = (__m128i*) sha256_h_quad;
+	__m128i *BufPrt = (__m128i*) state;
+	uint32_t i;
+	for(i=0;i<8;i++)
+		BufPrt[i] = ConstPrt[i];
+//	memcpy(state, sha256_h_quad, 32*4);
+}
+
+void MM_clear_mem(__m128i *memloc, uint32_t size)
+{
+	uint32_t i;
+	for (i=0;i<size;i++)
+		memloc[i] = _mm_setzero_si128();
 }
 
 /*
@@ -265,30 +280,32 @@ void MM_sha256_transform(__m128i *state,  const __m128i *block)
 	__m128i *ConstPrt = (__m128i*) sha256_k_quad;
 	__m128i _calc;
 
-	memcpy(W, block, 64*4);
+	for(i=0;i<16;i++)
+		WPrt[i] = block[i]; // memcpy(W, block, 64*4);
 
 	/* 1. Prepare message schedule W. */
 
 	for (i = 16; i < 64; i += 2) {
-		_calc = WPrt[i-2];
-		WPrt[i] = funct_s1(_calc);
-		_calc = WPrt[i-15];
-		_calc = funct_s0(_calc);
+		// _calc = WPrt[i-2];
+		WPrt[i] = funct_s1(WPrt + i - 2);
+		// _calc = WPrt[i-15];
+		_calc = funct_s0(WPrt + i - 15);
 		WPrt[i] = _mm_add_epi32(WPrt[i], WPrt[i-7]);
 		WPrt[i] = _mm_add_epi32(WPrt[i], _calc);
 		WPrt[i] = _mm_add_epi32(WPrt[i], WPrt[i-16]);
 
-		_calc = WPrt[i-1];
-		WPrt[i+1] = funct_s1(_calc);
-		_calc = WPrt[i-14];
-		_calc = funct_s0(_calc);
+		// _calc = WPrt[i-1];
+		WPrt[i+1] = funct_s1(WPrt + i - 1);
+		// _calc = WPrt[i-14];
+		_calc = funct_s0(WPrt + i - 14);
 		WPrt[i+1] = _mm_add_epi32(WPrt[i+1], WPrt[i-6]);
 		WPrt[i+1] = _mm_add_epi32(WPrt[i+1], _calc);
 		WPrt[i+1] = _mm_add_epi32(WPrt[i+1], WPrt[i-15]);
 	}
 
 	/* 2. Initialize working variables. */
-	memcpy(&S, state, 32*4);
+	for(i=0;i<8;i++)
+		SPrt[i] = state[i]; //	memcpy(&S, state, 32*4);
 
 	_calc = _mm_add_epi32(WPrt[0], ConstPrt[0]);
 	MM_RND(SPrt+0,SPrt+1,SPrt+2,SPrt+3,SPrt+4,SPrt+5,SPrt+6,SPrt+7, _calc);

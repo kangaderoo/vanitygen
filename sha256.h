@@ -108,6 +108,8 @@ void sha256_transform(uint32_t *state, const uint32_t *block);
 
 void sha256_finish(uint32_t *state,  const unsigned char *block,  int blcklen, int swap);
 
+void MM_clear_mem(__m128i *memloc, uint32_t size);
+
 void MM_sha256_init(uint32_t *state);
 
 void MM_sha256_transform(__m128i *state, const __m128i *block);

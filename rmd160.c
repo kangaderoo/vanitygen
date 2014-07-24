@@ -32,11 +32,17 @@ void MDinit(dword *MDbuf)
    MDbuf[3] = 0x10325476UL;
    MDbuf[4] = 0xc3d2e1f0UL;
 
-   return;
+//   return;
 }
 
 void MM_MDinit(uint32_t *MDbuf)
 {
+	__m128i *ConstPrt = (__m128i*) mdbuf_quad;
+	__m128i *BufPrt = (__m128i*) MDbuf;
+	uint32_t i;
+	for(i=0;i<5;i++)
+		BufPrt[i] = ConstPrt[i];
+#if 0
    MDbuf[0] = 0x67452301UL;
    MDbuf[4] = 0xefcdab89UL;
    MDbuf[8] = 0x98badcfeUL;
@@ -60,8 +66,8 @@ void MM_MDinit(uint32_t *MDbuf)
    MDbuf[11] = 0x98badcfeUL;
    MDbuf[15] = 0x10325476UL;
    MDbuf[19] = 0xc3d2e1f0UL;
-
-   return;
+#endif
+//   return;
 }
 
 
@@ -563,7 +569,7 @@ void MM_compress(__m128i *MDbuf, __m128i *X)
    MDbuf[4] = _mm_add_epi32(MDbuf[0],_mm_add_epi32(bb,ccc));
    MDbuf[0] = ddd;
 
-   return;
+//   return;
 }
 
 
@@ -577,12 +583,13 @@ void MM_MDfinish(__m128i *MDbuf, __m128i *strptr, dword lswlen, dword mswlen)
 //	const __m128i vm = _mm_setr_epi8(3,2,1,0,7,6,5,4,11,10,9,8,15,14,13,12);
 //	const __m128i vm = _mm_setr_epi8(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15);
 
-   memset(X, 0, 16*4*sizeof(dword));
+//   memset(X, 0, 16*4*sizeof(dword));
    for (i=0; i<((lswlen/4)&15); i++) {
 //	   XPrt[i] = _mm_shuffle_epi8(strptr[i],vm);
 	   XPrt[i] = strptr[i];
    }
-
+   for (;i<16;i++)
+	   XPrt[i] = _mm_setzero_si128();
 //   /* put bytes from strptr into X */
 //   for (i=0; i<(lswlen&63); i++) {
 //      /* byte i goes into word X[i div 4] at pos.  8*(i mod 4)  */
@@ -609,7 +616,7 @@ void MM_MDfinish(__m128i *MDbuf, __m128i *strptr, dword lswlen, dword mswlen)
 //  X[15] = (lswlen >> 29) | (mswlen << 3);
    MM_compress(MDbuf, XPrt);
 
-   return;
+//   return;
 }
 
 
@@ -640,7 +647,7 @@ void MDfinish(dword *MDbuf, byte *strptr, dword lswlen, dword mswlen)
    X[15] = (lswlen >> 29) | (mswlen << 3);
    compress(MDbuf, X);
 
-   return;
+//   return;
 }
 
 void MM_matrix_transpose_r2c(__m128i* inbuf,__m128i* outbuf, uint32_t rows, uint32_t colums)

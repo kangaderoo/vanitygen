@@ -32,6 +32,13 @@ typedef    unsigned int         dword;
 typedef int the_correct_size_was_chosen [sizeof (dword) == 4? 1: -1];
 
 /********************************************************************/
+static const uint32_t mdbuf_quad[5*4] = {
+		0x67452301, 0x67452301, 0x67452301, 0x67452301,
+		0xefcdab89, 0xefcdab89, 0xefcdab89, 0xefcdab89,
+		0x98badcfe, 0x98badcfe, 0x98badcfe, 0x98badcfe,
+		0x10325476, 0x10325476, 0x10325476, 0x10325476,
+		0xc3d2e1f0, 0xc3d2e1f0, 0xc3d2e1f0, 0xc3d2e1f0
+};
 
 /* macro definitions */
 

@@ -39,6 +39,8 @@
 #include <stdlib.h>
 #include <inttypes.h>
 
+#include "custom_ec_bn.h"
+
 const char *version = VANITYGEN_VERSION;
 
 
@@ -49,15 +51,15 @@ const char *version = VANITYGEN_VERSION;
 void *
 vg_thread_loop(void *arg)
 {
-	unsigned char hash_buf[128*4]  				__attribute__((aligned(16)));;
-	unsigned char hash_buf_transpose[128*4]  	__attribute__((aligned(16)));;
+	unsigned char hash_buf[128*4]  				__attribute__((aligned(16)));
+	unsigned char hash_buf_transpose[128*4]  	__attribute__((aligned(16)));
 	// keep the size 128, in order to maintain the SHA256 512 bits per chunk
 	uint32_t *sha256lenPtr = &hash_buf;
 	unsigned char *eckey_buf;
-	unsigned char hash1[32*4] 					__attribute__((aligned(16)));;;
-	unsigned char hash2[32*4] 					__attribute__((aligned(16)));;;
-	unsigned char hash1_transpose[32*4] 		__attribute__((aligned(16)));;;
-	unsigned char hash2_transpose[32*4] 		__attribute__((aligned(16)));;;
+	unsigned char hash1[32*4] 					__attribute__((aligned(16)));
+//	unsigned char hash2[32*4] 					__attribute__((aligned(16)));
+//	unsigned char hash1_transpose[32*4] 		__attribute__((aligned(16)));
+    unsigned char hash2_transpose[32*4] 		__attribute__((aligned(16)));
 
 	int i, j, c, len, output_interval;
 	int hash_len;
@@ -65,6 +67,8 @@ vg_thread_loop(void *arg)
 
 	const BN_ULONG rekey_max = 10000000;
 	BN_ULONG npoints, rekey_at, nbatch;
+//	BIGNUM *X,*Y,*Z;
+//	_sidm_bn_context_t temp;
 
 	vg_context_t *vcp = (vg_context_t *) arg;
 	EC_KEY *pkey = NULL;
@@ -80,21 +84,17 @@ vg_thread_loop(void *arg)
 
 	struct timeval tvstart;
 
-//	const __m128i vm = _mm_setr_epi8(12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3);
-//	const __m128i vm = _mm_setr_epi8(3,2,1,0,7,6,5,4,11,10,9,8,15,14,13,12);
-
 	uint32_t         MDbuf[8 * 4]  __attribute__((aligned(16)));
 	uint32_t         MDbuf_transpose[8 * 4]  __attribute__((aligned(16)));
-//    __m128i 		 *MDbufPtr = (__m128i*) MDbuf;
     unsigned char    *MDBufChar = (unsigned char*) MDbuf;
-//    BN_CTX           *ctx_buffer[4];
-
-	//	dword         MDBufByte[5] __attribute__((aligned(16)));
 
 	memset(&ctx,                0, sizeof(ctx));
+//	MM_clear_mem(&hash_buf, 32*4);
+//	MM_clear_mem(&hash_buf_transpose, 32*4);
+
 	memset(&hash_buf,           0, 4*128);
 	memset(&hash_buf_transpose, 0, 4*128);
-	memset(&hash2_transpose,    0 ,4*32);
+	memset(&hash2_transpose,    0 ,4*32); // if this dummy is not here and init to zero. a segmentation fault occurs.
 
 	vxcp = &ctx;
 
@@ -117,6 +117,7 @@ vg_thread_loop(void *arg)
 		exit(1);
 	}
 
+
 	BN_set_word(&vxcp->vxc_bntmp, ptarraysize);
 	EC_POINT_mul(pgroup, pbatchinc, &vxcp->vxc_bntmp, NULL, NULL,
 		     vxcp->vxc_bnctx);
@@ -132,12 +133,14 @@ vg_thread_loop(void *arg)
 	gettimeofday(&tvstart, NULL);
 
 	if (vcp->vc_format == VCF_SCRIPT) {
+		//hash_len = (vcp->vc_compressed)?37:69;
+		hash_len = 69;
 		for (j=0;j<4;j++){
 			hash_buf[ 0+j*128] = 0x51;  // OP_1
 			hash_buf[ 1+j*128] = 0x41;  // pubkey length
 			// gap for pubkey
-			hash_buf[67+j*128] = 0x51;  // OP_1
-			hash_buf[68+j*128] = 0xae;  // OP_CHECKMULTISIG
+			hash_buf[(hash_len-2)+j*128] = 0x51;  // OP_1
+			hash_buf[(hash_len-1)+j*128] = 0xae;  // OP_CHECKMULTISIG
 		}
 		eckey_buf = hash_buf + 2;
 		hash_len = 69;
@@ -158,14 +161,15 @@ vg_thread_loop(void *arg)
 			EC_GROUP_get_order(pgroup, &vxcp->vxc_bntmp,
 					   vxcp->vxc_bnctx);
 			BN_sub(&vxcp->vxc_bntmp2,
-			       &vxcp->vxc_bntmp,
-			       EC_KEY_get0_private_key(pkey));
+				   &vxcp->vxc_bntmp,
+				   EC_KEY_get0_private_key(pkey));
 			rekey_at = BN_get_word(&vxcp->vxc_bntmp2);
 			if ((rekey_at == BN_MASK2) || (rekey_at > rekey_max))
 				rekey_at = rekey_max;
 			assert(rekey_at > 0);
 
 			EC_POINT_copy(ppnt[0], EC_KEY_get0_public_key(pkey));
+
 			vg_exec_context_downgrade_lock(vxcp);
 
 			npoints++;
@@ -173,39 +177,49 @@ vg_thread_loop(void *arg)
 
 			if (vcp->vc_pubkey_base)
 				EC_POINT_add(pgroup,
-					     ppnt[0],
-					     ppnt[0],
-					     vcp->vc_pubkey_base,
-					     vxcp->vxc_bnctx);
+						 ppnt[0],
+						 ppnt[0],
+						 vcp->vc_pubkey_base,
+						 vxcp->vxc_bnctx);
 
 			for (nbatch = 1;
-			     (nbatch < ptarraysize) && (npoints < rekey_at);
-			     nbatch++, npoints++) {
+				 (nbatch < ptarraysize) && (npoints < rekey_at);
+  				 nbatch++, npoints++) {
 				EC_POINT_add(pgroup,
-					     ppnt[nbatch],
-					     ppnt[nbatch-1],
-					     pgen, vxcp->vxc_bnctx);
+						 ppnt[nbatch],
+						 ppnt[nbatch-1],
+						 pgen, vxcp->vxc_bnctx);
 			}
-
 		} else {
-			/*
-			 * Common case
-			 *
-			 * EC_POINT_add() can skip a few multiplies if
-			 * one or both inputs are affine (Z_is_one).
-			 * This is the case for every point in ppnt, as
-			 * well as pbatchinc.
-			 */
-			assert(nbatch == ptarraysize);
-			for (nbatch = 0;
-			     (nbatch < ptarraysize) && (npoints < rekey_at);
-			     nbatch++, npoints++) {
-				EC_POINT_add(pgroup,
-					     ppnt[nbatch],
-					     ppnt[nbatch],
-					     pbatchinc,
-					     vxcp->vxc_bnctx);
-			}
+				/*
+				 * Common case
+				 *
+				 * EC_POINT_add() can skip a few multiplies if
+				 * one or both inputs are affine (Z_is_one).
+				 * This is the case for every point in ppnt, as
+				 * well as pbatchinc.
+				 */
+
+#if 0
+				assert(nbatch == ptarraysize);
+#endif
+				for (nbatch = 0;
+					 (nbatch < ptarraysize) && (npoints < rekey_at);
+					 nbatch++, npoints++) {
+#if 1
+					EC_POINT_add(pgroup,
+							 ppnt[nbatch],
+							 ppnt[nbatch],
+							 pbatchinc,
+							 vxcp->vxc_bnctx);
+#else
+					BN_EC_Point_Add_Affine(pgroup,
+							 ppnt[nbatch],
+							 ppnt[nbatch],
+							 pbatchinc,
+							 vxcp->vxc_bnctx);
+#endif
+				}
 		}
 
 		/*
@@ -218,8 +232,9 @@ vg_thread_loop(void *arg)
 		 * To take advantage of this, we batch up a few points,
 		 * and feed them to EC_POINTs_make_affine() below.
 		 */
-
+#if 1
 		EC_POINTs_make_affine(pgroup, nbatch, ppnt, vxcp->vxc_bnctx);
+#endif
 
 		for (i = 0; i < nbatch; i=i+step) {
 			for (j=0; j< step;j++){
@@ -228,9 +243,10 @@ vg_thread_loop(void *arg)
 							 (vcp->vc_compressed)?POINT_CONVERSION_COMPRESSED:POINT_CONVERSION_UNCOMPRESSED,
 							 eckey_buf+(j*128),
 							 (vcp->vc_compressed)?33:65,
-
 							 vxcp->vxc_bnctx);
+#if 0
 				assert(len == 65 || len == 33);
+#endif
 				vxcp->vxc_delta++;
 			}
 
@@ -243,7 +259,7 @@ vg_thread_loop(void *arg)
 				// hash_len is 65 or 69 length, so for SHA256 always two chunks
 				// so the SHA prepare is here; add "1" and length are inserted in the buffer
 				if (vcp->vc_compressed){
-					// compressed haslen is 33 only one chunk.
+					// compressed hash-len is 33 only one chunk.
 					hash_buf[hash_len+(j*128)]= 0x80;
 					sha256lenPtr[14+j*32] = (hash_len >> 29);
 					sha256lenPtr[15+j*32] =	hash_len << 3;
@@ -290,14 +306,23 @@ vg_thread_loop(void *arg)
 //				MD_matrix_transpose_r2c(hash1,hash1_transpose, 4, 8);
 				MM_MDinit(MDbuf_transpose);
 //				_mm_MDfinish(MDbuf_transpose, hash1_transpose /*hash1*/, sizeof(hash1)/4, 0);
-				MM_MDfinish(MDbuf_transpose, hash1 /*hash1_transpose*/, sizeof(hash2)/4, 0);
+				MM_MDfinish(MDbuf_transpose, hash1 /*hash1_transpose*/, sizeof(hash1)/4, 0);
 				MM_matrix_transpose_c2r(MDbuf_transpose, MDbuf, 8, 4);
+				//from this point the 4 byte checksum could be calculated.
+				// sha256 the MDBuf, add a byte of 0 to the front (making the length 160/8 +1 = 21 bytes
+				// sha256 this result and take the 4 first bytes as the checksum result.
+				// when the search is not regex, these steps could be skipped, these LSB will not influence
+				// the vanity bitcoin address at the first ~10-15 characters
+
+				// base58 the result, a zero is added to the result for Bitcoin addresses
+				// the source can be treated as a base-256 or base-65536 (reduces the number of steps) and run on SSE/AVX
 #endif
 			}
 			vxcp->vxc_delta=vxcp->vxc_delta-step;
 		    for (j=0;j<step;j++){
 	    		memcpy(vxcp->vxc_binres+1,MDBufChar+j*32,20);
-		    	switch (test_func(vxcp)) {
+#if 1
+	    		switch (test_func(vxcp)) {
 					case 1:
 						npoints = 0;
 						rekey_at = 0;
@@ -309,7 +334,8 @@ vg_thread_loop(void *arg)
 					default:
 						break;
 				}
-			    vxcp->vxc_delta++;
+#endif
+	    		vxcp->vxc_delta++;
 		    }
 		}
 
