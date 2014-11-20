@@ -1,8 +1,8 @@
 LIBS=-lpcre -lcrypto -lm -lpthread
 CFLAGS=-ggdb -O3 -Wall -march=native
-OBJS=vanitygen.o oclvanitygen.o oclvanityminer.o oclengine.o keyconv.o pattern.o util.o rmd160.o sha256.o
+OBJS=vanitygen.o oclvanitygen.o oclvanityminer.o oclengine.o keyconv.o pattern.o util.o rmd160.o sha256.o custom_ec_bn.o
 #PROGS=vanitygen keyconv oclvanitygen oclvanityminer
-PROGS=vanitygen
+PROGS=vanitygen 
 
 PLATFORM=$(shell uname -s)
 ifeq ($(PLATFORM),Darwin)
@@ -16,7 +16,7 @@ most: vanitygen keyconv
 
 all: $(PROGS)
 
-vanitygen: vanitygen.o pattern.o util.o rmd160.o sha256.o
+vanitygen: vanitygen.o pattern.o util.o rmd160.o sha256.o custom_ec_bn.o
 	$(CC) $^ -o $@ $(CFLAGS) $(LIBS)
 
 oclvanitygen: oclvanitygen.o oclengine.o pattern.o util.o
