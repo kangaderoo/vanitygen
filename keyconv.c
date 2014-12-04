@@ -31,6 +31,8 @@ usage(const char *progname)
 "-C 		   Generate Compressed key\n"
 "-e            Encrypt output key, prompt for password\n"
 "-X <version>  Generate address with the given version\n"
+"-p <privtyp>  The priv-type belonging to the version, default <version>+128\n"
+"              default is used when ommitted, can only be used combined with -X\n"
 "-E <password> Encrypt output key with <password> (UNSAFE)\n"
 "-c <key>      Combine private key parts to make complete private key\n"
 "-v            Verbose output\n",
@@ -49,17 +51,17 @@ main(int argc, char **argv)
 	const char *key2_in = NULL;
 	EC_KEY *pkey;
 	int parameter_group = -1;
-	int privtype, addrtype;
 	int compressedkey = 0;
+	int privtype, addrtype, newprivtype;
 	int pkcs8 = 0;
 	int pass_prompt = 0;
 	int verbose = 0;
 	int generate = 0;
-	int versionoverride=0;
+	int versionoverride=0, privtypeoverride=0;
 	int opt;
 	int res;
 
-	while ((opt = getopt(argc, argv, "8E:ec:vGX:")) != -1) {
+	while ((opt = getopt(argc, argv, "8E:ec:vGX:p:C")) != -1) {
 		switch (opt) {
 		case 'C':
 			compressedkey = 1;
@@ -98,6 +100,10 @@ main(int argc, char **argv)
 			privtype = 128 + addrtype;
 			versionoverride = 1;
 			break;
+		case 'p':
+			newprivtype = atoi(optarg);
+			privtypeoverride = 1;
+			break;
 		default:
 			usage(argv[0]);
 			return 1;
@@ -105,6 +111,9 @@ main(int argc, char **argv)
 	}
 
 	OpenSSL_add_all_algorithms();
+
+	addrtype = 0;
+	privtype = 128;
 
 	pkey = EC_KEY_new_by_curve_name(NID_secp256k1);
 	if (!(versionoverride)){
@@ -114,10 +123,12 @@ main(int argc, char **argv)
 		default:  addrtype = 0; break;
 		}
 	}
+	if (privtypeoverride && versionoverride){
+		privtype = newprivtype;
+	}
 	if (generate) {
 		unsigned char *pend = (unsigned char *) pbuf;
-//		addrtype = 0;
-//		privtype = 128;
+		unsigned char *cpub = (unsigned char *) cbuf;
 		EC_KEY_generate_key(pkey);
 		res = i2o_ECPublicKey(pkey, &pend);
 		fprintf(stderr, "---------------------------------------------------------\n");
