@@ -16,6 +16,8 @@
  * along with Vanitygen.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#define AVX1SUPPORT
+
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -206,19 +208,11 @@ vg_thread_loop(void *arg)
 				for (nbatch = 0;
 					 (nbatch < ptarraysize) && (npoints < rekey_at);
 					 nbatch++, npoints++) {
-#if 1
 					EC_POINT_add(pgroup,
 							 ppnt[nbatch],
 							 ppnt[nbatch],
 							 pbatchinc,
 							 vxcp->vxc_bnctx);
-#else
-					BN_EC_Point_Add_Affine(pgroup,
-							 ppnt[nbatch],
-							 ppnt[nbatch],
-							 pbatchinc,
-							 vxcp->vxc_bnctx);
-#endif
 				}
 		}
 
@@ -232,9 +226,7 @@ vg_thread_loop(void *arg)
 		 * To take advantage of this, we batch up a few points,
 		 * and feed them to EC_POINTs_make_affine() below.
 		 */
-#if 1
 		EC_POINTs_make_affine(pgroup, nbatch, ppnt, vxcp->vxc_bnctx);
-#endif
 
 		for (i = 0; i < nbatch; i=i+step) {
 			for (j=0; j< step;j++){
@@ -256,7 +248,7 @@ vg_thread_loop(void *arg)
 				vxcp->vxc_delta++;
 			}
 
-#if 0
+#ifndef AVX1SUPPORT
 			for (j=0; j< step;j++){
 				SHA256(hash_buf+(j*128), hash_len, hash1+(j*32));
 			}
@@ -299,7 +291,7 @@ vg_thread_loop(void *arg)
 				MDinit(MDbuf);
 				MDfinish(MDbuf, hash1, sizeof(hash1)/4, 0);
 			}else{
-#if 0
+#ifndef AVX1SUPPORT
 				MDinit(MDbuf);
 				MDfinish(MDbuf, hash1, sizeof(hash1)/4, 0);
 				MDinit(MDbuf+8);
@@ -327,7 +319,6 @@ vg_thread_loop(void *arg)
 			vxcp->vxc_delta=vxcp->vxc_delta-step;
 		    for (j=0;j<step;j++){
 	    		memcpy(vxcp->vxc_binres+1,MDBufChar+j*32,20);
-#if 1
 	    		switch (test_func(vxcp)) {
 					case 1:
 						npoints = 0;
@@ -340,7 +331,6 @@ vg_thread_loop(void *arg)
 					default:
 						break;
 				}
-#endif
 	    		vxcp->vxc_delta++;
 		    }
 		}
