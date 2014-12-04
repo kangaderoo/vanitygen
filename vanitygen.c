@@ -491,10 +491,10 @@ main(int argc, char **argv)
 	int npattfp = 0;
 	int pattstdin = 0;
 	int compressed = 0;
-
+	int newprivtype, privtypeoverride = 0;
 	int i;
 
-	while ((opt = getopt(argc, argv, "Lvqnrik1eE:P:NTX:F:t:h?f:o:s:")) != -1) {
+	while ((opt = getopt(argc, argv, "Lvqnrik1eE:P:NTX:F:t:h?f:o:s:p:")) != -1) {
 		switch (opt) {
 		case 'c':
 		        compressed = 1;
@@ -539,6 +539,10 @@ main(int argc, char **argv)
 			addrtype = atoi(optarg);
 			privtype = 128 + addrtype;
 			scriptaddrtype = addrtype;
+			break;
+		case 'p':
+			newprivtype = atoi(optarg);
+			privtypeoverride = 1;
 			break;
 		case 'F':
 			if (!strcmp(optarg, "script"))
@@ -632,6 +636,9 @@ main(int argc, char **argv)
 			usage(argv[0]);
 			return 1;
 		}
+	}
+	if (privtypeoverride==1){
+		privtype= newprivtype;
 	}
 
 #if OPENSSL_VERSION_NUMBER < 0x10000000L
