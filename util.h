@@ -48,6 +48,8 @@ extern void vg_encode_privkey_compressed(const EC_KEY *pkey, int addrtype, char 
 extern int vg_set_privkey(const BIGNUM *bnpriv, EC_KEY *pkey);
 extern int vg_decode_privkey(const char *b58encoded,
 			     EC_KEY *pkey, int *addrtype);
+extern int vg_decode_privkey_compressed(const char *b58encoded,
+			     EC_KEY *pkey, int *addrtype);
 
 enum {
 	VG_PROTKEY_DEFAULT = -1,

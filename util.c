@@ -394,6 +394,24 @@ vg_decode_privkey(const char *b58encoded, EC_KEY *pkey, int *addrtype)
 	return 1;
 }
 
+int
+vg_decode_privkey_compressed(const char *b58encoded, EC_KEY *pkey, int *addrtype)
+{
+	BIGNUM bnpriv;
+	unsigned char ecpriv[48];
+	int res;
+
+	res = vg_b58_decode_check(b58encoded, ecpriv, sizeof(ecpriv));
+	if (res != 34)
+		return 0;
+
+	BN_init(&bnpriv);
+	BN_bin2bn(ecpriv + 1, res - 2, &bnpriv);
+	res = vg_set_privkey(&bnpriv, pkey);
+	BN_clear_free(&bnpriv);
+	*addrtype = ecpriv[0];
+	return 1;
+}
 #if OPENSSL_VERSION_NUMBER < 0x10000000L
 /* The generic PBKDF2 function first appeared in OpenSSL 1.0 */
 /* ====================================================================
@@ -915,6 +933,8 @@ vg_decode_privkey_any(EC_KEY *pkey, int *addrtype, const char *input,
 	int res;
 
 	if (vg_decode_privkey(input, pkey, addrtype))
+		return 1;
+	if (vg_decode_privkey_compressed(input, pkey, addrtype))
 		return 1;
 	if (vg_protect_decode_privkey(pkey, addrtype, input, NULL)) {
 		if (!pass)
