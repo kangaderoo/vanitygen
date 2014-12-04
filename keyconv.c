@@ -28,6 +28,7 @@ usage(const char *progname)
 "Usage: %s [-8] [-e|-E <password>] [-c <key>] [<key>]\n"
 "-G            Generate a key pair and output the full public key\n"
 "-8            Output key in PKCS#8 form\n"
+"-C 		   Generate Compressed key\n"
 "-e            Encrypt output key, prompt for password\n"
 "-X <version>  Generate address with the given version\n"
 "-E <password> Encrypt output key with <password> (UNSAFE)\n"
@@ -36,19 +37,20 @@ usage(const char *progname)
 		version, progname);
 }
 
-
 int
 main(int argc, char **argv)
 {
 	char pwbuf[128];
 	char ecprot[128];
 	char pbuf[1024];
+	char cbuf[1024];
 	const char *key_in;
 	const char *pass_in = NULL;
 	const char *key2_in = NULL;
 	EC_KEY *pkey;
 	int parameter_group = -1;
 	int privtype, addrtype;
+	int compressedkey = 0;
 	int pkcs8 = 0;
 	int pass_prompt = 0;
 	int verbose = 0;
@@ -59,6 +61,9 @@ main(int argc, char **argv)
 
 	while ((opt = getopt(argc, argv, "8E:ec:vGX:")) != -1) {
 		switch (opt) {
+		case 'C':
+			compressedkey = 1;
+			break;
 		case '8':
 			pkcs8 = 1;
 			break;
@@ -115,16 +120,34 @@ main(int argc, char **argv)
 //		privtype = 128;
 		EC_KEY_generate_key(pkey);
 		res = i2o_ECPublicKey(pkey, &pend);
-		fprintf(stderr, "Pubkey (hex): ");
+		fprintf(stderr, "---------------------------------------------------------\n");
+		fprintf(stderr, "Results:\n");
+		fprintf(stderr, "Pubkey (hex):\n\t");
 		dumphex((unsigned char *)pbuf, res);
-		fprintf(stderr, "Privkey (hex): ");
+		fprintf(stderr, "Privkey (hex):\n\t");
 		dumpbn(EC_KEY_get0_private_key(pkey));
 		vg_encode_address(EC_KEY_get0_public_key(pkey),
 				  EC_KEY_get0_group(pkey),
 				  addrtype, ecprot);
 		printf("Address: %s\n", ecprot);
 		vg_encode_privkey(pkey, privtype, ecprot);
-		printf("Privkey: %s\n", ecprot);
+		printf("WiF key: %s\n", ecprot);
+		if (compressedkey == 1){
+			printf("Compressed Results:\n");
+			res = EC_POINT_point2oct(EC_KEY_get0_group(pkey), EC_KEY_get0_public_key(pkey),
+									 POINT_CONVERSION_COMPRESSED,
+									 cpub, 33, NULL);
+			printf("Pubkey Compressed (hex):\n\t");
+			dumphex((unsigned char *)cpub, res);
+			vg_encode_address_compressed(EC_KEY_get0_public_key(pkey),
+					  EC_KEY_get0_group(pkey),
+					  addrtype, ecprot);
+			printf("Address Compressed:\n\t%s\n", ecprot);
+			vg_encode_privkey_compressed(pkey, privtype, ecprot);
+			printf("Wif key Compressed:\n\t%s\n", ecprot);
+			fprintf(stderr, "---------------------------------------------------------\n");
+		}
+
 		return 0;
 	}
 
@@ -232,12 +255,39 @@ main(int argc, char **argv)
 	}
 
 	else {
+		unsigned char *cpub = (unsigned char *) cbuf;
+		unsigned char *pend = (unsigned char *) pbuf;
+
+		res = i2o_ECPublicKey(pkey, &pend);
+		fprintf(stderr, "---------------------------------------------------------\n");
+		fprintf(stderr, "Results:\n");
+		fprintf(stderr, "Pubkey (hex):\n\t");
+		dumphex((unsigned char *)pbuf, res);
+		fprintf(stderr, "Privkey (hex):\n\t");
+		dumpbn(EC_KEY_get0_private_key(pkey));
+
 		vg_encode_address(EC_KEY_get0_public_key(pkey),
 				  EC_KEY_get0_group(pkey),
 				  addrtype, ecprot);
 		printf("Address: %s\n", ecprot);
 		vg_encode_privkey(pkey, privtype, ecprot);
-		printf("Privkey: %s\n", ecprot);
+		printf("Wif key: %s\n", ecprot);
+		if (compressedkey == 1){
+			printf("Compressed Results:\n");
+			res = EC_POINT_point2oct(EC_KEY_get0_group(pkey), EC_KEY_get0_public_key(pkey),
+									 POINT_CONVERSION_COMPRESSED,
+									 cpub, 33, NULL);
+			printf("Pubkey Compressed (hex):\n\t");
+			dumphex((unsigned char *)cpub, res);
+			vg_encode_address_compressed(EC_KEY_get0_public_key(pkey),
+					  EC_KEY_get0_group(pkey),
+					  addrtype, ecprot);
+			printf("Address Compressed:\n\t%s\n", ecprot);
+			vg_encode_privkey_compressed(pkey, privtype, ecprot);
+			printf("Wif key Compressed:\n\t%s\n", ecprot);
+			fprintf(stderr, "---------------------------------------------------------\n");
+		}
+
 	}
 
 	OPENSSL_cleanse(pwbuf, sizeof(pwbuf));
