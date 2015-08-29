@@ -52,7 +52,7 @@ main(int argc, char **argv)
 	EC_KEY *pkey;
 	int parameter_group = -1;
 	int compressedkey = 0;
-	int privtype, addrtype, newprivtype;
+	int privtype, addrtype, newprivtype=0;
 	int pkcs8 = 0;
 	int pass_prompt = 0;
 	int verbose = 0;
@@ -112,8 +112,10 @@ main(int argc, char **argv)
 
 	OpenSSL_add_all_algorithms();
 
-	addrtype = 0;
-	privtype = 128;
+	if (versionoverride==0){
+		addrtype = 0;
+		privtype = 128;
+	}
 
 	pkey = EC_KEY_new_by_curve_name(NID_secp256k1);
 	if (!(versionoverride)){
