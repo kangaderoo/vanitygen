@@ -16,6 +16,7 @@
  * along with Vanitygen.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "pattern.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -31,10 +32,8 @@
 
 #include <pcre.h>
 
-#include "pattern.h"
 #include "util.h"
 #include "avl.h"
-
 
 /*
  * Common code for execution helper
@@ -169,6 +168,7 @@ vg_exec_context_init(vg_context_t *vcp, vg_exec_context_t *vxcp)
 
 	vxcp->vxc_next = vcp->vc_threads;
 	vcp->vc_threads = vxcp;
+	vxcp->vc_combined_compressed = vcp->vc_compressed;
 	__vg_exec_context_yield(vxcp);
 	pthread_mutex_unlock(&vg_thread_lock);
 	return 1;
@@ -256,7 +256,7 @@ vg_exec_context_calc_address(vg_exec_context_t *vxcp)
 	}
 	len = EC_POINT_point2oct(pgroup,
 				 pubkey,
-				 vxcp->vxc_vc->vc_compressed ? POINT_CONVERSION_COMPRESSED : POINT_CONVERSION_UNCOMPRESSED,
+				 vxcp->vc_combined_compressed ? POINT_CONVERSION_COMPRESSED : POINT_CONVERSION_UNCOMPRESSED,
 				 eckey_buf,
 				 sizeof(eckey_buf),
 				 vxcp->vxc_bnctx);
@@ -502,7 +502,8 @@ vg_output_timing_console(vg_context_t *vcp, double count,
 }
 
 void
-vg_output_match_console(vg_context_t *vcp, EC_KEY *pkey, const char *pattern)
+//vg_output_match_console(vg_context_t *vcp, EC_KEY *pkey, const char *pattern)
+vg_output_match_console(vg_context_t *vcp, vg_exec_context_t *vxcp, const char *pattern)
 {
 	unsigned char key_buf[512], *pend;
 	char addr_buf[64], addr2_buf[64];
@@ -510,7 +511,7 @@ vg_output_match_console(vg_context_t *vcp, EC_KEY *pkey, const char *pattern)
 	const char *keytype = "Privkey";
 	int len;
 	int isscript = (vcp->vc_format == VCF_SCRIPT);
-
+	EC_KEY *pkey = vxcp->vxc_key;
 	EC_POINT *ppnt;
 	int free_ppnt = 0;
 	if (vcp->vc_pubkey_base) {
@@ -528,7 +529,8 @@ vg_output_match_console(vg_context_t *vcp, EC_KEY *pkey, const char *pattern)
 	}
 
 	assert(EC_KEY_check_key(pkey));
-	if (vcp->vc_compressed)
+//	if (vcp->vc_combined_compressed)
+	if (vxcp->vc_combined_compressed)
 		vg_encode_address_compressed(ppnt,
 				  EC_KEY_get0_group(pkey),
 				  vcp->vc_pubkeytype, addr_buf);
@@ -555,7 +557,8 @@ vg_output_match_console(vg_context_t *vcp, EC_KEY *pkey, const char *pattern)
 		}
 	}
 	if (!vcp->vc_key_protect_pass) {
-		if (vcp->vc_compressed)
+//		if (vcp->vc_combined_compressed)
+		if (vxcp->vc_combined_compressed)
 			vg_encode_privkey_compressed(pkey, vcp->vc_privtype, privkey_buf);
 		else
 			vg_encode_privkey(pkey, vcp->vc_privtype, privkey_buf);
@@ -1009,8 +1012,10 @@ vg_prefix_avl_insert(avl_root_t *rootp, vg_prefix_t *vpnew)
 	vg_prefix_t *vp;
 	avl_item_t *itemp = NULL;
 	avl_item_t **ptrp = &rootp->ar_root;
+
 	while (*ptrp) {
 		itemp = *ptrp;
+//		ptrp = &itemp->ai_left;
 		vp = avl_item_entry(itemp, vg_prefix_t, vp_item);
 		if (BN_cmp(vp->vp_low, vpnew->vp_high) > 0) {
 			ptrp = &itemp->ai_left;
@@ -1021,6 +1026,7 @@ vg_prefix_avl_insert(avl_root_t *rootp, vg_prefix_t *vpnew)
 				return vp;
 		}
 	}
+
 	vpnew->vp_item.ai_up = itemp;
 	itemp = &vpnew->vp_item;
 	*ptrp = itemp;
@@ -1492,7 +1498,9 @@ research:
 			goto research;
 
 		vg_exec_context_consolidate_key(vxcp);
-		vcpp->base.vc_output_match(&vcpp->base, vxcp->vxc_key,
+//		vcpp->base.vc_output_match(&vcpp->base, vxcp->vxc_key,
+//					   vp->vp_pattern, &combined_compressed);
+		vcpp->base.vc_output_match(&vcpp->base, vxcp,
 					   vp->vp_pattern);
 
 		vcpp->base.vc_found++;
@@ -1792,7 +1800,9 @@ restart_loop:
 			goto restart_loop;
 
 		vg_exec_context_consolidate_key(vxcp);
-		vcrp->base.vc_output_match(&vcrp->base, vxcp->vxc_key,
+//		vcrp->base.vc_output_match(&vcrp->base, vxcp->vxc_key,
+//					   vcrp->vcr_regex_pat[i], combined_compressed);
+		vcrp->base.vc_output_match(&vcrp->base, vxcp,
 					   vcrp->vcr_regex_pat[i]);
 		vcrp->base.vc_found++;
 

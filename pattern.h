@@ -19,12 +19,20 @@
 #if !defined (__VG_PATTERN_H__)
 #define __VG_PATTERN_H__
 
+#if defined(_WIN32)
+#include "winglue.h"
+#ifndef PCRE_STATIC
+#define PCRE_STATIC
+#endif
+#endif
+
+
 #include <openssl/bn.h>
 #include <openssl/ec.h>
 
 #include <pthread.h>
 
-#ifdef _WIN32
+#if defined(_WIN32)
 #include "winglue.h"
 #else
 #define INLINE inline
@@ -50,6 +58,7 @@ struct _vg_exec_context_s {
 	BN_CTX				*vxc_bnctx;
 	EC_KEY				*vxc_key;
 	int				vxc_delta;
+    int         vc_combined_compressed;
 	unsigned char			vxc_binres[28];
 	BIGNUM				vxc_bntarg;
 	BIGNUM				vxc_bnbase;
@@ -75,7 +84,9 @@ typedef void (*vg_clear_all_patterns_func_t)(vg_context_t *);
 typedef int (*vg_test_func_t)(vg_exec_context_t *);
 typedef int (*vg_hash160_sort_func_t)(vg_context_t *vcp, void *buf);
 typedef void (*vg_output_error_func_t)(vg_context_t *vcp, const char *info);
-typedef void (*vg_output_match_func_t)(vg_context_t *vcp, EC_KEY *pkey,
+//typedef void (*vg_output_match_func_t)(vg_context_t *vcp, EC_KEY *pkey,
+//				       const char *pattern);
+typedef void (*vg_output_match_func_t)(vg_context_t *vcp, vg_exec_context_t *vxcp,
 				       const char *pattern);
 typedef void (*vg_output_timing_func_t)(vg_context_t *vcp, double count,
 					unsigned long long rate,
@@ -150,8 +161,12 @@ extern vg_context_t *vg_regex_context_new(int addrtype, int privtype);
 
 /* Utility functions */
 extern int vg_output_timing(vg_context_t *vcp, int cycle, struct timeval *last);
-extern void vg_output_match_console(vg_context_t *vcp, EC_KEY *pkey,
-				    const char *pattern);
+extern void vg_output_match_console(vg_context_t *vcp, vg_exec_context_t *vxcp,
+		const char *pattern);
+
+//extern void vg_output_match_console(vg_context_t *vcp, EC_KEY *pkey,
+//				    const char *pattern, int compressed);
+
 extern void vg_output_timing_console(vg_context_t *vcp, double count,
 				     unsigned long long rate,
 				     unsigned long long total);

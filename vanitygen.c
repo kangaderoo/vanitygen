@@ -45,6 +45,11 @@
 
 const char *version = VANITYGEN_VERSION;
 
+const enum compressiontype{
+	UNCOMPRESSED = 0,
+	COMPRESSED = 1,
+	COMBINED = 2,
+};
 
 /*
  * Address search thread main loop
@@ -56,7 +61,7 @@ vg_thread_loop(void *arg)
 	unsigned char hash_buf[128*4]  				__attribute__((aligned(16)));
 	unsigned char hash_buf_transpose[128*4]  	__attribute__((aligned(16)));
 	// keep the size 128, in order to maintain the SHA256 512 bits per chunk
-	uint32_t *sha256lenPtr = &hash_buf;
+	uint32_t *sha256lenPtr = (uint32_t *)&hash_buf;
 	unsigned char *eckey_buf;
 	unsigned char hash1[32*4] 					__attribute__((aligned(16)));
 //	unsigned char hash2[32*4] 					__attribute__((aligned(16)));
@@ -149,7 +154,19 @@ vg_thread_loop(void *arg)
 
 	} else {
 		eckey_buf = hash_buf;
-		hash_len = (vcp->vc_compressed)?33:65;
+		switch(vcp->vc_compressed){
+			case UNCOMPRESSED:
+				hash_len = 65;
+				break;
+			case COMPRESSED:
+				hash_len = 33;
+				break;
+			case COMBINED:
+				hash_len = 65;
+				vxcp->vc_combined_compressed = 0; // starting uncompressed
+				break;
+		}
+//		hash_len = (vcp->vc_compressed)?33:65;
 	}
 
 	while (!vcp->vc_halt) {
@@ -228,25 +245,67 @@ vg_thread_loop(void *arg)
 		 */
 		EC_POINTs_make_affine(pgroup, nbatch, ppnt, vxcp->vxc_bnctx);
 
+		if (vcp->vc_compressed == COMBINED)
+			nbatch = nbatch * 2;
+
 		for (i = 0; i < nbatch; i=i+step) {
-			for (j=0; j< step;j++){
-				/* Hash the public key */
-				// BN_bn2bin()
-				// this function does perform a affine check/modify that cannot be bypassed, it is rewritten to
-				// a simpler form., just get the jacobian X and Y, since the group-affine put Z equal 1.
-				// convert the BigNum to octal stream.
-				// Compressed is determined by Y, compressed 02->Y=even 03->Y=odd; 04->uncompressed
-				len = struct_EC_POINT_point2oct(pgroup, ppnt[i+j],
-//    			len = EC_POINT_point2oct(pgroup, ppnt[i+j],
-							 (vcp->vc_compressed)?POINT_CONVERSION_COMPRESSED:POINT_CONVERSION_UNCOMPRESSED,
-							 eckey_buf+(j*128),
-							 (vcp->vc_compressed)?33:65,
-							 vxcp->vxc_bnctx);
-#if 0
-				assert(len == 65 || len == 33);
-#endif
-				vxcp->vxc_delta++;
+			if (i==nbatch/2 && vcp->vc_compressed == COMBINED){
+				vxcp->vxc_delta = vxcp->vxc_delta - i;
+				memset(&hash_buf, 0, 512);
 			}
+			for (j=0; j< step;j++){
+				switch (vcp->vc_compressed){
+					case UNCOMPRESSED:
+							/* Hash the public key */
+							// BN_bn2bin()
+							// this function does perform a affine check/modify that cannot be bypassed, it is rewritten to
+							// a simpler form., just get the jacobian X and Y, since the group-affine put Z equal 1.
+							// convert the BigNum to octal stream.
+							// Compressed is determined by Y, compressed 02->Y=even 03->Y=odd; 04->uncompressed
+							len = struct_EC_POINT_point2oct(pgroup, ppnt[i+j],
+			//    			len = EC_POINT_point2oct(pgroup, ppnt[i+j],
+										 POINT_CONVERSION_UNCOMPRESSED,
+										 eckey_buf+(j*128),
+										 65,
+										 vxcp->vxc_bnctx);
+
+							vxcp->vxc_delta++;
+						hash_len = 65;
+						break;
+					case COMPRESSED:
+							len = struct_EC_POINT_point2oct(pgroup, ppnt[i+j],
+										 POINT_CONVERSION_COMPRESSED,
+										 eckey_buf+(j*128),
+										 33,
+										 vxcp->vxc_bnctx);
+
+							vxcp->vxc_delta++;
+						hash_len = 33;
+						break;
+					case COMBINED:
+						if (i < ptarraysize){
+							len = struct_EC_POINT_point2oct(pgroup, ppnt[i+j],
+										 POINT_CONVERSION_UNCOMPRESSED,
+										 eckey_buf+(j*128),
+										 65,
+										 vxcp->vxc_bnctx);
+							vxcp->vxc_delta++;
+							vxcp->vc_combined_compressed = 0;
+							hash_len = 65;
+						}else{
+							len = struct_EC_POINT_point2oct(pgroup, ppnt[(i-ptarraysize)+j],
+										 POINT_CONVERSION_COMPRESSED,
+										 eckey_buf+(j*128),
+										 33,
+										 vxcp->vxc_bnctx);
+
+							vxcp->vc_combined_compressed = 1;
+							vxcp->vxc_delta++;
+							hash_len = 33;
+						}
+						break;
+					}
+				}
 
 #ifndef AVX1SUPPORT
 			for (j=0; j< step;j++){
@@ -256,7 +315,7 @@ vg_thread_loop(void *arg)
 			for (j=0; j< step;j++){
 				// hash_len is 65 or 69 length, so for SHA256 always two chunks
 				// so the SHA prepare is here; add "1" and length are inserted in the buffer
-				if (vcp->vc_compressed){
+				if (vxcp->vc_combined_compressed){
 					// compressed hash-len is 33 only one chunk.
 					hash_buf[hash_len+(j*128)]= 0x80;
 					sha256lenPtr[14+j*32] = (hash_len >> 29);
@@ -268,23 +327,23 @@ vg_thread_loop(void *arg)
 				}
 			}
 			// transpose the hash_buf from row to column
-			MM_matrix_transpose_r2c(hash_buf,hash_buf_transpose, 4, 32);
+			MM_matrix_transpose_r2c((__m128i*)hash_buf,(__m128i*)hash_buf_transpose, 4, 32);
 			// Big/small endian recoding
 			// don't use 32, the last two positions hold the length, already formatted correctly.
 			// since the buffer also contains 0's minimal = 18 (69/4)+1, big endians of 0 are still 0
-			if (vcp->vc_compressed)
-				MM_beRecode(hash_buf_transpose,14);
+			if (vxcp->vc_combined_compressed)
+				MM_beRecode((__m128i*)hash_buf_transpose,14);
 			else
-				MM_beRecode(hash_buf_transpose,30);
+				MM_beRecode((__m128i*)hash_buf_transpose,30);
 			// init the hash
-			MM_sha256_init(hash1);
+			MM_sha256_init((uint32_t*)hash1);
 			// run transform first chunk
-			MM_sha256_transform(hash1, hash_buf_transpose);
+			MM_sha256_transform((__m128i*)hash1, (__m128i*)hash_buf_transpose);
 			// run transform 2nd chunk
-			if (!(vcp->vc_compressed))
-					MM_sha256_transform(hash1, hash_buf_transpose+256);
+			if (!(vxcp->vc_combined_compressed))
+					MM_sha256_transform((__m128i*)hash1, (__m128i*)(hash_buf_transpose+256));
 			// Big/small endian recoding
-			MM_beRecode(hash1,16);
+			MM_beRecode((__m128i*)hash1,16);
 
 #endif
 			if (step==1){
@@ -304,8 +363,8 @@ vg_thread_loop(void *arg)
 //				MD_matrix_transpose_r2c(hash1,hash1_transpose, 4, 8);
 				MM_MDinit(MDbuf_transpose);
 //				_mm_MDfinish(MDbuf_transpose, hash1_transpose /*hash1*/, sizeof(hash1)/4, 0);
-				MM_MDfinish(MDbuf_transpose, hash1 /*hash1_transpose*/, sizeof(hash1)/4, 0);
-				MM_matrix_transpose_c2r(MDbuf_transpose, MDbuf, 8, 4);
+				MM_MDfinish((__m128i*)MDbuf_transpose, (__m128i*)hash1 /*hash1_transpose*/, sizeof(hash1)/4, 0);
+				MM_matrix_transpose_c2r((__m128i*)MDbuf_transpose, (__m128i*)MDbuf, 8, 4);
 				//from this point the 4 byte checksum could be calculated.
 				// sha256 the MDBuf, add a byte of 0 to the front (making the length 160/8 +1 = 21 bytes
 				// sha256 this result and take the 4 first bytes as the checksum result.
@@ -321,12 +380,13 @@ vg_thread_loop(void *arg)
 	    		memcpy(vxcp->vxc_binres+1,MDBufChar+j*32,20);
 	    		switch (test_func(vxcp)) {
 					case 1:
-						npoints = 0;
-						rekey_at = 0;
-						i = nbatch;
-						j = step;
+//						npoints = 0;
+//						rekey_at = 0;
+//						i = nbatch;
+//						j = step;
 						break;
 					case 2:
+//						break;
 						goto out;
 					default:
 						break;
@@ -436,7 +496,8 @@ usage(const char *name)
 "-N            Generate namecoin address\n"
 "-T            Generate bitcoin testnet address\n"
 "-X <version>  Generate address with the given version\n"
-"-F <format>   Generate address with the given format (pubkey, compressed, script)\n"
+"-p <privtyp>  The priv-type belonging to the version, default <version>+128\n"
+"-F <format>   Generate address with the given format (pubkey, compressed, combined, script)\n"
 "-P <pubkey>   Specify base public key for piecewise key generation\n"
 "-e            Encrypt private keys, prompt for password\n"
 "-E <password> Encrypt private keys with <password> (UNSAFE)\n"
@@ -480,7 +541,7 @@ main(int argc, char **argv)
 	int pattfpi[MAX_FILE];
 	int npattfp = 0;
 	int pattstdin = 0;
-	int compressed = 0;
+	int compressed = 0; // make use of this switch to combine compresses with uncompressed
 	int newprivtype, privtypeoverride = 0;
 	int i;
 
@@ -537,15 +598,17 @@ main(int argc, char **argv)
 		case 'F':
 			if (!strcmp(optarg, "script"))
 				format = VCF_SCRIPT;
-                        else
-                        if (!strcmp(optarg, "compressed"))
-                                compressed = 1;
-                        else
-			if (strcmp(optarg, "pubkey")) {
-				fprintf(stderr,
-					"Invalid format '%s'\n", optarg);
-				return 1;
-			}
+            else
+              if (!strcmp(optarg, "compressed"))
+                 compressed = 1;
+              else
+            	  if (!strcmp(optarg, "combined"))
+            		  compressed = 2;
+            	  else
+            		  if (strcmp(optarg, "pubkey")) {
+            			  fprintf(stderr,  "Invalid format '%s'\n", optarg);
+            			  return 1;
+            		  }
 			break;
 		case 'P': {
 			if (pubkey_base != NULL) {
@@ -703,6 +766,7 @@ main(int argc, char **argv)
 			return 1;
 		}
 		patterns = &argv[optind];
+
 		npatterns = argc - optind;
 
 		if (!vg_context_add_patterns(vcp,
