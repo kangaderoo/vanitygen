@@ -8,7 +8,49 @@
 #include "sha256.h"
 
 // #define S0(x)           (ROTR(x, 2) ^ ROTR(x, 13) ^ ROTR(x, 22))
+// #define Maj(x, y, z)    ((x & (y | z)) | (y & z))
+
+__m128i funct_S0_Maj(__m128i *x, __m128i *y, __m128i *z)
+{
+        __m128i _calc_maj1 = _mm_or_si128(*y,*z);
+        __m128i _calc_maj2 = _mm_and_si128(*y,*z);
+        __m128i rot2 = _mm_srli_epi32(*x, 2);
+        __m128i _calc = _mm_slli_epi32(*x,(32 - 2));
+        __m128i rot13_22 = _mm_srli_epi32(*x, 13);
+
+        rot2 = _mm_xor_si128(rot2, _calc);
+        _calc = _mm_slli_epi32(*x,(32 - 13));
+        rot2 = _mm_xor_si128(rot2, rot13_22);
+        rot13_22 = _mm_srli_epi32(*x, 22);
+        rot2 = _mm_xor_si128(rot2, _calc);
+        _calc = _mm_slli_epi32(*x,(32 - 22));
+        rot2 = _mm_xor_si128(rot2, rot13_22);
+        _calc_maj1 = _mm_and_si128(_calc_maj1, *x);
+        rot2 = _mm_xor_si128(rot2, _calc);
+        _calc_maj1 = _mm_or_si128(_calc_maj1, _calc_maj2);
+        _calc = _mm_add_epi32(_calc_maj1, rot2);
+        return _calc;
+}
+
+
 __m128i funct_S0(const __m128i *x)
+{
+        __m128i rot2 = _mm_srli_epi32(*x, 2);
+        __m128i _calc = _mm_slli_epi32(*x,(32 - 2));
+        __m128i rot13_22 = _mm_srli_epi32(*x, 13);
+
+        rot2 = _mm_xor_si128(rot2, _calc);
+        _calc = _mm_slli_epi32(*x,(32 - 13));
+        rot2 = _mm_xor_si128(rot2, rot13_22);
+        rot13_22 = _mm_srli_epi32(*x, 22);
+        rot2 = _mm_xor_si128(rot2, _calc);
+        _calc = _mm_slli_epi32(*x,(32 - 22));
+        rot2 = _mm_xor_si128(rot2, rot13_22);
+        _calc = _mm_xor_si128(_calc, rot2);
+        return _calc;
+}
+
+__m128i funct_S0_old(const __m128i *x)
 {
         __m128i rot2 = _mm_srli_epi32(*x, 2);
         __m128i _calc = _mm_slli_epi32(*x,(32 - 2));
@@ -29,7 +71,47 @@ __m128i funct_S0(const __m128i *x)
 }
 
 // #define S1(x)           (ROTR(x, 6) ^ ROTR(x, 11) ^ ROTR(x, 25))
+// #define Ch(x, y, z)     ((x & (y ^ z)) ^ z)
+__m128i funct_S1_Ch(__m128i *x, __m128i *y, __m128i *z)
+{
+        __m128i rot6 = _mm_srli_epi32(*x, 6);
+        __m128i _calc = _mm_slli_epi32(*x,(32 - 6));
+        __m128i rot11_25 = _mm_srli_epi32(*x, 11);
+    	__m128i calc_Ch = _mm_xor_si128(*y,*z);
+
+        rot6 = _mm_xor_si128(rot6, _calc);
+        _calc = _mm_slli_epi32(*x,(32 - 11));
+        rot6 = _mm_xor_si128(rot6, rot11_25);
+        rot11_25 = _mm_srli_epi32(*x, 25);
+        rot6 = _mm_xor_si128(rot6, _calc);
+        _calc = _mm_slli_epi32(*x,(32 - 25));
+        rot6 = _mm_xor_si128(rot6, rot11_25);
+        calc_Ch = _mm_and_si128(calc_Ch, *x);
+        rot6 = _mm_xor_si128(rot6, _calc);
+        calc_Ch = _mm_xor_si128(calc_Ch, *z);
+        _calc = _mm_add_epi32(rot6, calc_Ch);
+        return _calc;
+}
+// #define S1(x)           (ROTR(x, 6) ^ ROTR(x, 11) ^ ROTR(x, 25))
 __m128i funct_S1(const __m128i *x)
+{
+        __m128i rot6 = _mm_srli_epi32(*x, 6);
+        __m128i _calc = _mm_slli_epi32(*x,(32 - 6));
+        __m128i rot11_25 = _mm_srli_epi32(*x, 11);
+
+        rot6 = _mm_xor_si128(rot6, _calc);
+        _calc = _mm_slli_epi32(*x,(32 - 11));
+        rot6 = _mm_xor_si128(rot6, rot11_25);
+        rot11_25 = _mm_srli_epi32(*x, 25);
+        rot6 = _mm_xor_si128(rot6, _calc);
+        _calc = _mm_slli_epi32(*x,(32 - 25));
+        rot6 = _mm_xor_si128(rot6, rot11_25);
+        _calc = _mm_xor_si128(_calc, rot6);
+
+        return _calc;
+}
+
+__m128i funct_S1_old(const __m128i *x)
 {
         __m128i rot6 = _mm_srli_epi32(*x, 6);
         __m128i _calc = _mm_slli_epi32(*x,(32 - 6));
@@ -48,7 +130,6 @@ __m128i funct_S1(const __m128i *x)
 
         return _calc;
 }
-
 // #define s0(x)           (ROTR(x, 7) ^ ROTR(x, 18) ^ (x >> 3))
 __m128i funct_s0(const __m128i *x)
 {
@@ -100,8 +181,8 @@ __m128i funct_Ch(__m128i *x, __m128i *y, __m128i *z)
 __m128i funct_Maj(__m128i *x, __m128i *y, __m128i *z)
 {
         __m128i _calc = _mm_or_si128(*y,*z);
-        _calc = _mm_and_si128(_calc, *x);
         __m128i _calc2 = _mm_and_si128(*y,*z);
+        _calc = _mm_and_si128(_calc, *x);
         _calc = _mm_or_si128(_calc, _calc2);
         return _calc;
 }
@@ -130,6 +211,22 @@ void MM_RND(__m128i *a, __m128i *b, __m128i *c, __m128i *d, __m128i *e, __m128i 
 {
 	__m128i t0;
 	__m128i t1;
+	__m128i _calc;
+
+	t0 = _mm_add_epi32(k, *h);
+	_calc = funct_S1_Ch(e,f,g);
+	t1 = funct_S0_Maj(a,b,c);
+	t0 = _mm_add_epi32(t0, _calc);
+
+	*d = _mm_add_epi32(*d, t0);
+	*h = _mm_add_epi32(t0, t1);
+}
+
+void MM_RND_old(__m128i *a, __m128i *b, __m128i *c, __m128i *d, __m128i *e, __m128i *f, __m128i *g, __m128i *h,
+		          const __m128i k)
+{
+	__m128i t0;
+	__m128i t1;
 	__m128i _calc = funct_S1(e);
 	__m128i _calc1 = funct_Ch(e, f, g);
 	_calc = _mm_add_epi32(_calc,_calc1);
@@ -141,7 +238,6 @@ void MM_RND(__m128i *a, __m128i *b, __m128i *c, __m128i *d, __m128i *e, __m128i 
 	*d = _mm_add_epi32(*d, t0);
 	*h = _mm_add_epi32(t1, t0);
 }
-
 /* Adjusted round function for rotating state */
 /*
  *  #define RNDr(S, W, i) \

@@ -114,28 +114,28 @@ static const __m128i *JJ_const = (__m128i*)JJ_const_arr;
 
 static inline void _mm_FF(__m128i *a, __m128i b, __m128i *c, __m128i d, __m128i e, __m128i x, int s) {
 	*(a) = _mm_add_epi32(*(a),_mm_add_epi32(_mm_F((b),*(c),(d)),(x)));
-	*(a) = _mm_add_epi32(_mm_ROL(*(a),s),(e));
 	*(c) = _mm_ROL(*(c),10);
+	*(a) = _mm_add_epi32(_mm_ROL(*(a),s),(e));
 }
 static inline void _mm_GG(__m128i *a, __m128i b, __m128i *c, __m128i d, __m128i e, __m128i x, int s) {
 	*(a) = _mm_add_epi32(*(a),_mm_add_epi32(_mm_G((b),*(c),(d)),_mm_add_epi32((x),*GG_const)));
-	*(a) = _mm_add_epi32(_mm_ROL(*(a),s),(e));
 	*(c) = _mm_ROL(*(c),10);
+	*(a) = _mm_add_epi32(_mm_ROL(*(a),s),(e));
 }
 static inline void _mm_HH(__m128i *a, __m128i b, __m128i *c, __m128i d, __m128i e, __m128i x, int s) {
 	*(a) = _mm_add_epi32(*(a),_mm_add_epi32(_mm_H((b),*(c),(d)),_mm_add_epi32((x),*HH_const)));
-	*(a) = _mm_add_epi32(_mm_ROL(*(a),s),(e));
 	*(c) = _mm_ROL(*(c),10);
+	*(a) = _mm_add_epi32(_mm_ROL(*(a),s),(e));
 }
 static inline void _mm_II(__m128i *a, __m128i b, __m128i *c, __m128i d, __m128i e, __m128i x, int s) {
 	*(a) = _mm_add_epi32(*(a),_mm_add_epi32(_mm_I((b),*(c),(d)),_mm_add_epi32((x),*II_const)));
-	*(a) = _mm_add_epi32(_mm_ROL(*(a),s),(e));
 	*(c) = _mm_ROL(*(c),10);
+	*(a) = _mm_add_epi32(_mm_ROL(*(a),s),(e));
 }
 static inline void _mm_JJ(__m128i *a, __m128i b, __m128i *c, __m128i d, __m128i e, __m128i x, int s) {
 	*(a) = _mm_add_epi32(*(a),_mm_add_epi32(_mm_J((b),*(c),(d)),_mm_add_epi32((x),*JJ_const)));
-	*(a) = _mm_add_epi32(_mm_ROL(*(a),s),(e));
 	*(c) = _mm_ROL(*(c),10);
+	*(a) = _mm_add_epi32(_mm_ROL(*(a),s),(e));
 }
 
 static const uint32_t GGG_const_arr[4] __attribute__((aligned(16))) = {0x7a6d76e9UL,0x7a6d76e9UL,0x7a6d76e9UL,0x7a6d76e9UL};
@@ -150,28 +150,28 @@ static const __m128i *JJJ_const = (__m128i*)JJJ_const_arr;
 
 static inline void _mm_FFF(__m128i *a, __m128i b, __m128i *c, __m128i d, __m128i e, __m128i x, int s) {
 	*(a) = _mm_add_epi32(*(a),_mm_add_epi32(_mm_F((b),*(c),(d)),(x)));
-	*(a) = _mm_add_epi32(_mm_ROL(*(a),s),(e));
 	*(c) = _mm_ROL(*(c),10);
+	*(a) = _mm_add_epi32(_mm_ROL(*(a),s),(e));
 }
 static inline void _mm_GGG(__m128i *a, __m128i b, __m128i *c, __m128i d, __m128i e, __m128i x, int s) {
 	*(a) = _mm_add_epi32(*(a),_mm_add_epi32(_mm_G((b),*(c),(d)),_mm_add_epi32((x),*GGG_const)));
-	*(a) = _mm_add_epi32(_mm_ROL(*(a),s),(e));
 	*(c) = _mm_ROL(*(c),10);
+	*(a) = _mm_add_epi32(_mm_ROL(*(a),s),(e));
 }
 static inline void _mm_HHH(__m128i *a, __m128i b, __m128i *c, __m128i d, __m128i e, __m128i x, int s) {
 	*(a) = _mm_add_epi32(*(a),_mm_add_epi32(_mm_H((b),*(c),(d)),_mm_add_epi32((x),*HHH_const)));
-	*(a) = _mm_add_epi32(_mm_ROL(*(a),s),(e));
 	*(c) = _mm_ROL(*(c),10);
+	*(a) = _mm_add_epi32(_mm_ROL(*(a),s),(e));
 }
 static inline void _mm_III(__m128i *a, __m128i b, __m128i *c, __m128i d, __m128i e, __m128i x, int s) {
 	*(a) = _mm_add_epi32(*(a),_mm_add_epi32(_mm_I((b),*(c),(d)),_mm_add_epi32((x),*III_const)));
-	*(a) = _mm_add_epi32(_mm_ROL(*(a),s),(e));
 	*(c) = _mm_ROL(*(c),10);
+	*(a) = _mm_add_epi32(_mm_ROL(*(a),s),(e));
 }
 static inline void _mm_JJJ(__m128i *a, __m128i b, __m128i *c, __m128i d, __m128i e, __m128i x, int s) {
 	*(a) = _mm_add_epi32(*(a),_mm_add_epi32(_mm_J((b),*(c),(d)),_mm_add_epi32((x),*JJJ_const)));
-	*(a) = _mm_add_epi32(_mm_ROL(*(a),s),(e));
 	*(c) = _mm_ROL(*(c),10);
+	*(a) = _mm_add_epi32(_mm_ROL(*(a),s),(e));
 }
 
 /********************************************************************/
