@@ -43,6 +43,10 @@
 
 #include "custom_ec_bn.h"
 
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#endif
+
 const char *version = VANITYGEN_VERSION;
 
 const enum compressiontype{
@@ -425,9 +429,14 @@ out:
 int
 count_processors(void)
 {
+	int count = 0;
+
+#if defined(__APPLE__)
+	size_t count_len = sizeof(count);
+	sysctlbyname("hw.logicalcpu", &count, &count_len, NULL, 0);
+#else
 	FILE *fp;
 	char buf[512];
-	int count = 0;
 
 	fp = fopen("/proc/cpuinfo", "r");
 	if (!fp)
@@ -438,6 +447,8 @@ count_processors(void)
 			count += 1;
 	}
 	fclose(fp);
+#endif
+
 	return count;
 }
 #endif
