@@ -57,10 +57,6 @@ usage(const char *name)
 "-i            Case-insensitive prefix search\n"
 "-k            Keep pattern and continue search after finding a match\n"
 "-1            Stop after first match\n"
-"-N            Generate namecoin address\n"
-"-T            Generate bitcoin testnet address\n"
-"-X <version>  Generate address with the given version\n"
-"-F <format>   Generate address with the given format (pubkey, compressed)\n"
 "-e            Encrypt private keys, prompt for password\n"
 "-E <password> Encrypt private keys with <password> (UNSAFE)\n"
 "-p <platform> Select OpenCL platform\n"
@@ -120,12 +116,11 @@ main(int argc, char **argv)
 	int pattfpi[MAX_FILE];
 	int npattfp = 0;
 	int pattstdin = 0;
-	int compressed = 0;
 
 	int i;
 
 	while ((opt = getopt(argc, argv,
-			     "vqik1NTX:F:eE:p:P:d:w:t:g:b:VSh?f:o:s:D:")) != -1) {
+			     "vqik1eE:p:P:d:w:t:g:b:VSh?f:o:s:D:")) != -1) {
 		switch (opt) {
 		case 'v':
 			verbose = 2;
@@ -141,28 +136,6 @@ main(int argc, char **argv)
 			break;
 		case '1':
 			only_one = 1;
-			break;
-		case 'N':
-			addrtype = 52;
-			privtype = 180;
-			break;
-		case 'T':
-			addrtype = 111;
-			privtype = 239;
-			break;
-		case 'X':
-			addrtype = atoi(optarg);
-			privtype = 128 + addrtype;
-			break;
-		case 'F':
-			if (!strcmp(optarg, "compressed"))
-				compressed = 1;
-			else
-			if (strcmp(optarg, "pubkey")) {
-				fprintf(stderr,
-					"Invalid format '%s'\n", optarg);
-				return 1;
-			}
 			break;
 		case 'e':
 			prompt_password = 1;
@@ -342,7 +315,6 @@ main(int argc, char **argv)
 					    caseinsensitive);
 	}
 
-	vcp->vc_compressed = compressed;
 	vcp->vc_verbose = verbose;
 	vcp->vc_result_file = result_file;
 	vcp->vc_remove_on_match = remove_on_match;

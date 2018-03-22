@@ -1209,6 +1209,7 @@ vg_ocl_kernel_start(vg_ocl_context_t *vocp, int slot, int ncol, int nrow,
 	assert(is_pow2(invsize) && (invsize > 1));
 
 	val = invsize;
+        // batch argument for heap_invert
 	ret = clSetKernelArg(vocp->voc_oclkernel[slot][1],
 			     1,
 			     sizeof(val),
@@ -1217,6 +1218,7 @@ vg_ocl_kernel_start(vg_ocl_context_t *vocp, int slot, int ncol, int nrow,
 		vg_ocl_error(vocp, ret, "clSetKernelArg(ncol)");
 		return 0;
 	}
+        // ec_add_grid(__global bn_word *points_out, __global bn_word *z_heap, __global bn_word *row_in, __global bignum *col_in)
 	ret = clEnqueueNDRangeKernel(vocp->voc_oclcmdq,
 				     vocp->voc_oclkernel[slot][0],
 				     2,
@@ -1241,6 +1243,7 @@ vg_ocl_kernel_start(vg_ocl_context_t *vocp, int slot, int ncol, int nrow,
 		return 0;
 	}
 
+        // heap_invert(__global bn_word *z_heap, int batch)
 	ret = clEnqueueNDRangeKernel(vocp->voc_oclcmdq,
 				     vocp->voc_oclkernel[slot][1],
 				     1,
@@ -1481,7 +1484,7 @@ vg_ocl_gethash_init(vg_ocl_context_t *vocp)
 	for (i = 0; i < vocp->voc_nslots; i++) {
 		/* Each slot gets its own hash output buffer */
 		if (!vg_ocl_kernel_arg_alloc(vocp, i, 0,
-					     20 *
+					     2/*compressed&uncompressed */ * 20 *
 					     vocp->voc_ocl_rows *
 					     vocp->voc_ocl_cols, 1))
 			return 0;
@@ -1571,15 +1574,17 @@ vg_ocl_prefix_check(vg_ocl_context_t *vocp, int slot)
 		/* GPU code claims match, verify with CPU version */
 		orig_delta = vxcp->vxc_delta;
 		vxcp->vxc_delta += found_delta;
-		vg_exec_context_calc_address(vxcp);
+                res = 0;
+                for (vxcp->vc_combined_compressed=0; vxcp->vc_combined_compressed<2 && !res; vxcp->vc_combined_compressed++) {
+                        vg_exec_context_calc_address(vxcp);
 
-		/* Make sure the GPU produced the expected hash */
-		res = 0;
-		if (!memcmp(vxcp->vxc_binres + 1,
-			    ocl_found_out + 2,
-			    20)) {
-			res = test_func(vxcp);
-		}
+                        /* Make sure the GPU produced the expected hash */
+                        if (!memcmp(vxcp->vxc_binres + 1,
+                                    ocl_found_out + 2,
+                                    20)) {
+                                res = test_func(vxcp);
+                        }
+                }
 		if (res == 0) {
 			/*
 			 * The match was not found in

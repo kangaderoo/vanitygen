@@ -225,12 +225,14 @@ void
 vg_exec_context_consolidate_key(vg_exec_context_t *vxcp)
 {
 	if (vxcp->vxc_delta) {
+                // privkey += delta
 		BN_clear(&vxcp->vxc_bntmp);
 		BN_set_word(&vxcp->vxc_bntmp, vxcp->vxc_delta);
 		BN_add(&vxcp->vxc_bntmp2,
 		       EC_KEY_get0_private_key(vxcp->vxc_key),
 		       &vxcp->vxc_bntmp);
 		vg_set_privkey(&vxcp->vxc_bntmp2, vxcp->vxc_key);
+                // delta = 0
 		vxcp->vxc_delta = 0;
 	}
 }

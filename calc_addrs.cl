@@ -1027,6 +1027,7 @@ __kernel void
 ec_add_grid(__global bn_word *points_out, __global bn_word *z_heap, 
 	    __global bn_word *row_in, __global bignum *col_in)
 {
+
 	bignum rx, ry;
 	bignum x1, y1, a, b, c, d, e, z;
 	bn_word cy;
@@ -1099,6 +1100,7 @@ ec_add_grid(__global bn_word *points_out, __global bn_word *z_heap,
 	start += (ACCESS_STRIDE/2);
 
 	bn_unroll(ec_add_grid_inner_4);
+
 }
 
 __kernel void
@@ -1213,7 +1215,7 @@ heap_invert(__global bn_word *z_heap, int batch)
 }
 
 void
-hash_ec_point(uint *hash_out, __global bn_word *xy, __global bn_word *zip)
+hash_ec_point(uint *hash_out, __global bn_word *xy, __global bn_word *zip, int compressed_address)
 {
 	uint hash1[16], hash2[16];
 	bignum c, zi, zzi;
@@ -1355,17 +1357,19 @@ hash_ec_point_get(__global uint *hashes_out,
 	points_in += start;
 
 	/* Complete the coordinates and hash */
-	hash_ec_point(hash, points_in, z_heap);
+        for (int compressed=0; compressed<2; compressed++) {
+                hash_ec_point(hash, points_in, z_heap, compressed);
 
-	p = get_global_size(0);
-	i = p * get_global_id(1);
-	hashes_out += 5 * (i + get_global_id(0));
+                p = get_global_size(0);
+                i = p * get_global_id(1);
+                hashes_out += 10 * (i + get_global_id(0)) + 5*compressed;
 
-	/* Output the hash in proper byte-order */
+                /* Output the hash in proper byte-order */
 #define hash_ec_point_get_inner_1(i)		\
-	hashes_out[i] = load_le32(hash[i]);
+                hashes_out[i] = load_le32(hash[i]);
 
-	hash160_unroll(hash_ec_point_get_inner_1);
+                hash160_unroll(hash_ec_point_get_inner_1);
+        }
 }
 
 /*
@@ -1413,36 +1417,39 @@ hash_ec_point_search_prefix(__global uint *found,
 	points_in += start;
 
 	/* Complete the coordinates and hash */
-	hash_ec_point(hash, points_in, z_heap);
-
-	/*
-	 * Unconditionally byteswap the hash result, because:
-	 * - The byte-level convention of RIPEMD160 is little-endian
-	 * - We are comparing it in big-endian order
-	 */
+        for (int compressed=0; compressed<2; compressed++) {
+                hash_ec_point(hash, points_in, z_heap, compressed);
+                
+                /*
+                 * Unconditionally byteswap the hash result, because:
+                 * - The byte-level convention of RIPEMD160 is little-endian
+                 * - We are comparing it in big-endian order
+                 */
+                
 #define hash_ec_point_search_prefix_inner_1(i)	\
-	hash[i] = bswap32(hash[i]);
+                hash[i] = bswap32(hash[i]);
 
-	hash160_unroll(hash_ec_point_search_prefix_inner_1);
+                hash160_unroll(hash_ec_point_search_prefix_inner_1);
 
-	/* Binary-search the target table for the hash we just computed */
-	for (high = ntargets - 1, low = 0, i = high >> 1;
-	     high >= low;
-	     i = low + ((high - low) >> 1)) {
-		p = hash160_ucmp_g(hash, &target_table[10*i]);
-		low = (p > 0) ? (i + 1) : low;
-		high = (p < 0) ? (i - 1) : high;
-		if (p == 0) {
-			/* For debugging purposes, write the hash value */
-			found[0] = ((get_global_id(1) * get_global_size(0)) +
-				    get_global_id(0));
-			found[1] = i;
+                // Binary-search the target table for the hash we just computed
+                for (high = ntargets - 1, low = 0, i = high >> 1;
+                     high >= low;
+                     i = low + ((high - low) >> 1)) {
+                        p = hash160_ucmp_g(hash, &target_table[10*i]);
+                        low = (p > 0) ? (i + 1) : low;
+                        high = (p < 0) ? (i - 1) : high;
+                        if (p == 0) {
+                                // For debugging purposes, write the hash value
+                                found[0] = ((get_global_id(1) * get_global_size(0)) +
+                                            get_global_id(0));
+                                found[1] = i;
 
 #define hash_ec_point_search_prefix_inner_2(i)	\
-			found[i+2] = load_be32(hash[i]);
+                                found[i+2] = load_be32(hash[i]);
 
-			hash160_unroll(hash_ec_point_search_prefix_inner_2);
-			high = -1;
-		}
-	}
+                                hash160_unroll(hash_ec_point_search_prefix_inner_2);
+                                high = -1;
+                        }
+                }
+        }
 }
