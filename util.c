@@ -403,7 +403,7 @@ vg_decode_privkey(const char *b58encoded, EC_KEY *pkey, int *addrtype)
 
 	res = vg_b58_decode_check(b58encoded, ecpriv, sizeof(ecpriv));
 	if (res != 33) {
-		fprintf(stderr, "len=%d != 33\n", res);
+		//fprintf(stderr, "len=%d != 33\n", res);
 		return 0;
 	}
 

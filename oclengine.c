@@ -2085,12 +2085,14 @@ vg_opencl_loop(vg_exec_context_t *arg)
 	
 	// save the priv. key to a file
 	if (save_file_name) {
-		char privkey_buf[128];
-		vg_encode_privkey(vxcp->vxc_key, vcp->vc_privtype, privkey_buf);
+		//vg_encode_privkey(vxcp->vxc_key, vcp->vc_privtype, privkey_buf);
 		FILE *sf = fopen(save_file_name, "w");
 		if (sf) {
+			char *privkey_buf = BN_bn2hex(EC_KEY_get0_private_key(vxcp->vxc_key));
 			fputs(privkey_buf, sf);
+			fputs("\n", sf);
 			fclose(sf);
+			OPENSSL_free(privkey_buf);
 		}
 	}
 	}
@@ -2513,8 +2515,13 @@ vg_ocl_context_new(vg_context_t *vcp,
 	
 	int addrtype = 128;
 	if (!vg_decode_privkey_any(vocp->base.vxc_key, &addrtype, start, NULL)) {
-		fprintf(stderr, "Wrong key format: %s\n", start);
-		goto out_fail;
+		BIGNUM *pk = NULL;
+		if (!BN_hex2bn(&pk, start)) {
+			fprintf(stderr, "Wrong key format: %s\n", start);
+			goto out_fail;
+		}
+		vg_set_privkey(pk, vocp->base.vxc_key);
+		BN_free(pk);
 	}
 	
 	return vocp;
