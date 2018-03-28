@@ -58,7 +58,7 @@ struct _vg_exec_context_s {
 	BN_CTX				*vxc_bnctx;
 	EC_KEY				*vxc_key;
 	int				vxc_delta;
-    int         vc_combined_compressed;
+	int         			vc_combined_compressed;
 	unsigned char			vxc_binres[28];
 	BIGNUM				vxc_bntarg;
 	BIGNUM				vxc_bnbase;
@@ -99,6 +99,7 @@ enum vg_format {
 
 /* Application-level context, incl. parameters and global pattern store */
 struct _vg_context_s {
+        char * patterns; // vc_npatterns*20 bytes
         int			vc_compressed;
 	int			vc_addrtype;
 	int			vc_privtype;
@@ -174,7 +175,6 @@ extern void vg_output_timing_console(vg_context_t *vcp, double count,
 
 
 /* Internal vg_context methods */
-extern int vg_context_hash160_sort(vg_context_t *vcp, void *buf);
 extern void vg_context_thread_exit(vg_context_t *vcp);
 
 /* Internal Init/cleanup for common execution context */

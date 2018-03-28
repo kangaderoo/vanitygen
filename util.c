@@ -88,6 +88,10 @@ dumphex(const unsigned char *src, size_t len)
 void
 dumpbn(const BIGNUM *bn)
 {
+/*	for (int i=0;i<bn->top; i++) {
+		BN_ULONG l = bn->d[i];
+		printf("%x %x ", (int)(l), (int)(l>>32));
+	}*/
 	fdumpbn(stdout, bn);
 }
 
@@ -200,8 +204,10 @@ vg_b58_decode_check(const char *input, void *buf, size_t len)
 	}
 	c = BN_num_bytes(&bn);
 	l = zpfx + c;
-	if (l < 5)
+	if (l < 5) {
+		printf("%d + %d < 5\n", zpfx, c);
 		goto out;
+	}
 	xbuf = (unsigned char *) malloc(l);
 	if (!xbuf)
 		goto out;
@@ -251,11 +257,23 @@ vg_encode_address(const EC_POINT *ppoint, const EC_GROUP *pgroup,
 			   eckey_buf,
 			   sizeof(eckey_buf),
 			   NULL);
+	
+#ifdef TRACE
+	printf("pre-hash: ");
+	for (int i=0;i<64; i++) printf("%02x ", eckey_buf[i]);
+	printf("\n");
+#endif
+		
 	pend = eckey_buf + 0x41;
 	binres[0] = addrtype;
 	SHA256(eckey_buf, pend - eckey_buf, hash1);
 	RIPEMD160(hash1, sizeof(hash1), &binres[1]);
 
+#ifdef TRACE
+	printf("Hash: ");
+	for (int i=0;i<20; i++) printf("%02x ", binres[i+1]);
+	printf("\n");
+#endif
 	vg_b58_encode_check(binres, sizeof(binres), result);
 }
 
@@ -353,6 +371,7 @@ vg_encode_privkey_compressed(const EC_KEY *pkey, int addrtype, char *result)
 int
 vg_set_privkey(const BIGNUM *bnpriv, EC_KEY *pkey)
 {
+	//printf("vg_set_privkey %lx\n", bnpriv->d[0]);
 	const EC_GROUP *pgroup;
 	EC_POINT *ppnt;
 	int res;
@@ -383,8 +402,10 @@ vg_decode_privkey(const char *b58encoded, EC_KEY *pkey, int *addrtype)
 	int res;
 
 	res = vg_b58_decode_check(b58encoded, ecpriv, sizeof(ecpriv));
-	if (res != 33)
+	if (res != 33) {
+		fprintf(stderr, "len=%d != 33\n", res);
 		return 0;
+	}
 
 	BN_init(&bnpriv);
 	BN_bin2bn(ecpriv + 1, res - 1, &bnpriv);

@@ -43,14 +43,14 @@
 
 
 #define MAX_SLOT 2
-#define MAX_ARG 6
+#define MAX_ARG 10
 #define MAX_KERNEL 3
 
 #define is_pow2(v) (!((v) & ((v)-1)))
 #define round_up_pow2(x, a) (((x) + ((a)-1)) & ~((a)-1))
 
-static void vg_ocl_free_args(vg_ocl_context_t *vocp);
-static void *vg_opencl_loop(vg_exec_context_t *arg);
+void vg_ocl_free_args(vg_ocl_context_t *vocp);
+void *vg_opencl_loop(vg_exec_context_t *arg);
 
 
 /* OpenCL address searching mode */
@@ -88,8 +88,10 @@ struct _vg_ocl_context_s {
 	int				voc_ocl_invsize;
 	int				voc_halt;
 	int				voc_dump_done;
+	long				voc_ocl_bitmap_size;
 };
 
+extern char * save_file_name;
 
 /* Thread synchronization stubs */
 void
@@ -108,7 +110,7 @@ vg_exec_upgrade_lock(vg_exec_context_t *vxcp)
  * OpenCL debugging and support
  */
 
-static const char *
+const char *
 vg_ocl_strerror(cl_int ret)
 {
 #define OCL_STATUS(st) case st: return #st;
@@ -179,7 +181,7 @@ vg_ocl_strerror(cl_int ret)
 }
 
 /* Get device strings, using a static buffer -- caveat emptor */
-static const char *
+const char *
 vg_ocl_platform_getstr(cl_platform_id pid, cl_platform_info param)
 {
 	static char platform_str[1024];
@@ -196,7 +198,7 @@ vg_ocl_platform_getstr(cl_platform_id pid, cl_platform_info param)
 	return platform_str;
 }
 
-static cl_platform_id
+cl_platform_id
 vg_ocl_device_getplatform(cl_device_id did)
 {
 	cl_int ret;
@@ -211,7 +213,7 @@ vg_ocl_device_getplatform(cl_device_id did)
 	return val;
 }
 
-static cl_device_type
+cl_device_type
 vg_ocl_device_gettype(cl_device_id did)
 {
 	cl_int ret;
@@ -226,7 +228,7 @@ vg_ocl_device_gettype(cl_device_id did)
 	return val;
 }
 
-static const char *
+const char *
 vg_ocl_device_getstr(cl_device_id did, cl_device_info param)
 {
 	static char device_str[1024];
@@ -243,7 +245,7 @@ vg_ocl_device_getstr(cl_device_id did, cl_device_info param)
 	return device_str;
 }
 
-static size_t
+size_t
 vg_ocl_device_getsizet(cl_device_id did, cl_device_info param)
 {
 	cl_int ret;
@@ -257,7 +259,7 @@ vg_ocl_device_getsizet(cl_device_id did, cl_device_info param)
 	return val;
 }
 
-static cl_ulong
+cl_ulong
 vg_ocl_device_getulong(cl_device_id did, cl_device_info param)
 {
 	cl_int ret;
@@ -271,7 +273,7 @@ vg_ocl_device_getulong(cl_device_id did, cl_device_info param)
 	return val;
 }
 
-static cl_uint
+cl_uint
 vg_ocl_device_getuint(cl_device_id did, cl_device_info param)
 {
 	cl_int ret;
@@ -330,7 +332,7 @@ vg_ocl_error(vg_ocl_context_t *vocp, int code, const char *desc)
 		vg_ocl_dump_info(vocp);
 }
 
-static void
+void
 vg_ocl_buildlog(vg_ocl_context_t *vocp, cl_program prog)
 {
 	size_t logbufsize, logsize;
@@ -408,7 +410,7 @@ enum {
 
 };
 
-static int
+int
 vg_ocl_get_quirks(vg_ocl_context_t *vocp)
 {
 	uint32_t vend;
@@ -459,7 +461,7 @@ vg_ocl_get_quirks(vg_ocl_context_t *vocp)
 	return quirks;
 }
 
-static int
+int
 vg_ocl_create_kernel(vg_ocl_context_t *vocp, int knum, const char *func)
 {
 	int i;
@@ -477,13 +479,14 @@ vg_ocl_create_kernel(vg_ocl_context_t *vocp, int knum, const char *func)
 			}
 			return 0;
 		}
+		
 		vocp->voc_oclkernel[i][knum] = krn;
 		vocp->voc_oclkrnwait[i] = NULL;
 	}
 	return 1;
 }
 
-static void
+void
 vg_ocl_hash_program(vg_ocl_context_t *vocp, const char *opts,
 		    const char *program, size_t size,
 		    unsigned char *hash_out)
@@ -539,7 +542,7 @@ typedef struct {
 	uint32_t	sh_entsize;
 } vg_elf32_shdr_t;
 
-static int
+int
 vg_ocl_amd_patch_inner(unsigned char *binary, size_t size)
 {
 	vg_elf32_header_t *ehp;
@@ -589,7 +592,7 @@ vg_ocl_amd_patch_inner(unsigned char *binary, size_t size)
 	return patched;
 }
 
-static int
+int
 vg_ocl_amd_patch(vg_ocl_context_t *vocp, unsigned char *binary, size_t size)
 {
 	vg_context_t *vcp = vocp->base.vxc_vc;
@@ -634,7 +637,7 @@ vg_ocl_amd_patch(vg_ocl_context_t *vocp, unsigned char *binary, size_t size)
 }
 
 
-static int
+int
 vg_ocl_load_program(vg_context_t *vcp, vg_ocl_context_t *vocp,
 		    const char *filename, const char *opts)
 {
@@ -845,7 +848,9 @@ vg_ocl_load_program(vg_context_t *vcp, vg_ocl_context_t *vocp,
 out:
 	vocp->voc_oclprog = prog;
 	if (!vg_ocl_create_kernel(vocp, 0, "ec_add_grid") ||
-	    !vg_ocl_create_kernel(vocp, 1, "heap_invert")) {
+	    !vg_ocl_create_kernel(vocp, 1, "heap_invert_and_check") ||
+	    !vg_ocl_create_kernel(vocp, 2, "fill_bitmap")
+	    ) {
 		clReleaseProgram(vocp->voc_oclprog);
 		vocp->voc_oclprog = NULL;
 		return 0;
@@ -854,7 +859,7 @@ out:
 	return 1;
 }
 
-static void CL_CALLBACK
+void CL_CALLBACK
 vg_ocl_context_callback(const char *errinfo,
 			const void *private_info,
 			size_t cb,
@@ -863,7 +868,7 @@ vg_ocl_context_callback(const char *errinfo,
 	fprintf(stderr, "vg_ocl_context_callback error: %s\n", errinfo);
 }
 
-static int
+int
 vg_ocl_init(vg_context_t *vcp, vg_ocl_context_t *vocp, cl_device_id did,
 	    int safe_mode)
 {
@@ -881,6 +886,8 @@ vg_ocl_init(vg_context_t *vcp, vg_ocl_context_t *vocp, cl_device_id did,
 
 	vocp->voc_ocldid = did;
 
+	cl_ulong localmemsize = vg_ocl_device_getulong(vocp->voc_ocldid, CL_DEVICE_LOCAL_MEM_SIZE);
+	
 	if (vcp->vc_verbose > 1)
 		vg_ocl_dump_info(vocp);
 
@@ -938,14 +945,15 @@ vg_ocl_init(vg_context_t *vcp, vg_ocl_context_t *vocp, cl_device_id did,
 				"-DCOMPRESSED_ADDRESS");
 	if (vocp->voc_quirks & VG_OCL_NV_VERBOSE)
 		end += snprintf(optbuf + end, sizeof(optbuf) - end,
-				"-cl-nv-verbose ");
+				"-cl-nv-verbose -cl-nv-maxrregcount=128 ");
+	end += snprintf(optbuf + end, sizeof(optbuf) - end, "-DLOCAL_MEM_SIZE=%ld ", localmemsize-16);
 
 	if (!vg_ocl_load_program(vcp, vocp, "calc_addrs.cl", optbuf))
 		return 0;
 	return 1;
 }
 
-static void
+void
 vg_ocl_del(vg_ocl_context_t *vocp)
 {
 	vg_ocl_free_args(vocp);
@@ -966,22 +974,40 @@ vg_ocl_del(vg_ocl_context_t *vocp)
 	vg_exec_context_del(&vocp->base);
 }
 
-static int vg_ocl_arg_map[][8] = {
-	/* hashes_out / found */
-	{ 2, 0, -1 },
+enum Arg {
+	A_FOUND = 0,
+	A_Z_HEAP,
+	A_POINTS,
+	A_ROW,
+	A_COL,
+	A_ADDRESSES,
+	A_ADDRESS_COUNT,
+	A_BITMAP,
+	A_BITMAP_LEN,
+};
+
+int vg_ocl_arg_map[][8] = {
+	/* found */
+	{ 1, 5, -1 },
 	/* z_heap */
-	{ 0, 1, 1, 0, 2, 2, -1 },
-	/* point_tmp */
-	{ 0, 0, 2, 1, -1 },
+	{ 0, 1, 1, 0, -1 },
+	/* points */
+	{ 0, 0, 1, 2, -1 },
 	/* row_in */
 	{ 0, 2, -1 },
 	/* col_in */
 	{ 0, 3, -1 },
-	/* target_table */
-	{ 2, 3, -1 },
+	/* addresses */
+	{ 2, 0, 1, 6, -1},
+	/* address count */
+	{ 2, 1, 1, 7, -1},
+	/* bitmap */
+	{ 1, 3, 2,2, -1 },
+	/* bitmap_len */
+	{ 1, 4, 2,3, -1 },
 };
 
-static int
+cl_mem
 vg_ocl_kernel_arg_alloc(vg_ocl_context_t *vocp, int slot,
 			int arg, size_t size, int host)
 {
@@ -1029,7 +1055,7 @@ vg_ocl_kernel_arg_alloc(vg_ocl_context_t *vocp, int slot,
 			
 			if (ret) {
 				fprintf(stderr,
-					"clSetKernelArg(%d,%d): ", knum, karg);
+					"cl_mem clSetKernelArg(kernel=%d,karg=%d,arg=%d) slot=%d: ", knum, karg, arg, i);
 				vg_ocl_error(vocp, ret, NULL);
 				return 0;
 			}
@@ -1037,7 +1063,7 @@ vg_ocl_kernel_arg_alloc(vg_ocl_context_t *vocp, int slot,
 	}
 
 	clReleaseMemObject(clbuf);
-	return 1;
+	return clbuf;
 }
 
 int
@@ -1068,7 +1094,7 @@ vg_ocl_copyout_arg(vg_ocl_context_t *vocp, int wslot, int arg,
 	return 1;
 }
 
-static void *
+void *
 vg_ocl_map_arg_buffer(vg_ocl_context_t *vocp, int slot,
 		      int arg, int rw)
 {
@@ -1094,7 +1120,7 @@ vg_ocl_map_arg_buffer(vg_ocl_context_t *vocp, int slot,
 	return buf;
 }
 
-static void
+void
 vg_ocl_unmap_arg_buffer(vg_ocl_context_t *vocp, int slot,
 			int arg, void *buf)
 {
@@ -1127,19 +1153,50 @@ vg_ocl_kernel_int_arg(vg_ocl_context_t *vocp, int slot,
 		      int arg, int value)
 {
 	cl_int ret;
-	int i;
+	int i, j, knum, karg;
 
 	for (i = 0; i < MAX_SLOT; i++) {
 		if ((i != slot) && (slot >= 0))
 			continue;
-		ret = clSetKernelArg(vocp->voc_oclkernel[i][2],
-				     arg,
-				     sizeof(value),
-				     &value);
-		if (ret) {
-			fprintf(stderr, "clSetKernelArg(%d): ", arg);
-			vg_ocl_error(vocp, ret, NULL);
-			return 0;
+		for (j = 0; vg_ocl_arg_map[arg][j] >= 0; j += 2) {
+			knum = vg_ocl_arg_map[arg][j];
+			karg = vg_ocl_arg_map[arg][j+1];
+			ret = clSetKernelArg(vocp->voc_oclkernel[i][knum],
+					     karg,
+					     sizeof(value),
+					     &value);
+			if (ret) {
+				fprintf(stderr, "clSetKernelArg(%d): ", arg);
+				vg_ocl_error(vocp, ret, NULL);
+				return 0;
+			}
+		}
+	}
+	return 1;
+}
+
+int
+vg_ocl_kernel_long_arg(vg_ocl_context_t *vocp, int slot,
+		      int arg, long value)
+{
+	cl_int ret;
+	int i, j, knum, karg;
+
+	for (i = 0; i < MAX_SLOT; i++) {
+		if ((i != slot) && (slot >= 0))
+			continue;
+		for (j = 0; vg_ocl_arg_map[arg][j] >= 0; j += 2) {
+			knum = vg_ocl_arg_map[arg][j];
+			karg = vg_ocl_arg_map[arg][j+1];
+			ret = clSetKernelArg(vocp->voc_oclkernel[i][knum],
+					     karg,
+					     sizeof(value),
+					     &value);
+			if (ret) {
+				fprintf(stderr, "clSetKernelArg(%d): ", arg);
+				vg_ocl_error(vocp, ret, NULL);
+				return 0;
+			}
 		}
 	}
 	return 1;
@@ -1164,7 +1221,7 @@ vg_ocl_kernel_buffer_arg(vg_ocl_context_t *vocp, int slot,
 					     value);
 			if (ret) {
 				fprintf(stderr,
-					"clSetKernelArg(%d,%d): ", knum, karg);
+					"vg_ocl_kernel_buffer_arg clSetKernelArg(%d,%d): ", knum, karg);
 				vg_ocl_error(vocp, ret, NULL);
 				return 0;
 			}
@@ -1173,7 +1230,7 @@ vg_ocl_kernel_buffer_arg(vg_ocl_context_t *vocp, int slot,
 	return 1;
 }
 
-static void
+void
 vg_ocl_free_args(vg_ocl_context_t *vocp)
 {
 	int i, arg;
@@ -1194,7 +1251,7 @@ vg_ocl_kernel_dead(vg_ocl_context_t *vocp, int slot)
 	return (vocp->voc_oclkrnwait[slot] == NULL);
 }
 
-static int
+int
 vg_ocl_kernel_start(vg_ocl_context_t *vocp, int slot, int ncol, int nrow,
 		    int invsize)
 {
@@ -1242,8 +1299,8 @@ vg_ocl_kernel_start(vg_ocl_context_t *vocp, int slot, int ncol, int nrow,
 		fprintf(stderr, "ERROR: Kernel 0 failed verification test\n");
 		return 0;
 	}
-
-        // heap_invert(__global bn_word *z_heap, int batch)
+       
+        // heap_invert_and_check(z_heap,batch,points_in,bitmap, bitmap_len, found)
 	ret = clEnqueueNDRangeKernel(vocp->voc_oclcmdq,
 				     vocp->voc_oclkernel[slot][1],
 				     1,
@@ -1251,31 +1308,8 @@ vg_ocl_kernel_start(vg_ocl_context_t *vocp, int slot, int ncol, int nrow,
 				     0, NULL,
 				     &ev);
 	if (ret != CL_SUCCESS) {
+		fprintf(stderr, "slot=%d\n", slot);
 		vg_ocl_error(vocp, ret, "clEnqueueNDRange(1)");
-		return 0;
-	}
-
-	ret = clWaitForEvents(1, &ev);
-	clReleaseEvent(ev);
-	if (ret != CL_SUCCESS) {
-		vg_ocl_error(vocp, ret, "clWaitForEvents(NDRange,1)");
-		return 0;
-	}
-
-	if (vocp->voc_verify_func[1] &&
-	    !(vocp->voc_verify_func[1])(vocp, slot)) {
-		fprintf(stderr, "ERROR: Kernel 1 failed verification test\n");
-		return 0;
-	}
-
-	ret = clEnqueueNDRangeKernel(vocp->voc_oclcmdq,
-				     vocp->voc_oclkernel[slot][2],
-				     2,
-				     NULL, globalws, NULL,
-				     0, NULL,
-				     &ev);
-	if (ret != CL_SUCCESS) {
-		vg_ocl_error(vocp, ret, "clEnqueueNDRange(2)");
 		return 0;
 	}
 
@@ -1283,7 +1317,7 @@ vg_ocl_kernel_start(vg_ocl_context_t *vocp, int slot, int ncol, int nrow,
 	return 1;
 }
 
-static int
+int
 vg_ocl_kernel_wait(vg_ocl_context_t *vocp, int slot)
 {
 	cl_event ev;
@@ -1303,7 +1337,7 @@ vg_ocl_kernel_wait(vg_ocl_context_t *vocp, int slot)
 }
 
 
-static INLINE void
+INLINE void
 vg_ocl_get_bignum_raw(BIGNUM *bn, const unsigned char *buf)
 {
 	bn_expand(bn, 256);
@@ -1311,7 +1345,7 @@ vg_ocl_get_bignum_raw(BIGNUM *bn, const unsigned char *buf)
 	bn->top = (32 / sizeof(BN_ULONG));
 }
 
-static INLINE void
+INLINE void
 vg_ocl_put_bignum_raw(unsigned char *buf, const BIGNUM *bn)
 {
 	int bnlen = (bn->top * sizeof(BN_ULONG));
@@ -1326,7 +1360,7 @@ vg_ocl_put_bignum_raw(unsigned char *buf, const BIGNUM *bn)
 #define ACCESS_BUNDLE 1024
 #define ACCESS_STRIDE (ACCESS_BUNDLE/8)
 
-static void
+void
 vg_ocl_get_bignum_tpa(BIGNUM *bn, const unsigned char *buf, int cell)
 {
 	unsigned char bnbuf[32];
@@ -1356,7 +1390,7 @@ struct ec_point_st {
 	int Z_is_one;
 };
 
-static INLINE void
+INLINE void
 vg_ocl_get_point(EC_POINT *ppnt, const unsigned char *buf)
 {
 	static const unsigned char mont_one[] = { 0x01,0x00,0x00,0x03,0xd1 };
@@ -1368,7 +1402,7 @@ vg_ocl_get_point(EC_POINT *ppnt, const unsigned char *buf)
 	}
 }
 
-static INLINE void
+INLINE void
 vg_ocl_put_point(unsigned char *buf, const EC_POINT *ppnt)
 {
 	assert(ppnt->Z_is_one);
@@ -1376,7 +1410,7 @@ vg_ocl_put_point(unsigned char *buf, const EC_POINT *ppnt)
 	vg_ocl_put_bignum_raw(buf + 32, &ppnt->Y);
 }
 
-static void
+void
 vg_ocl_put_point_tpa(unsigned char *buf, int cell, const EC_POINT *ppnt)
 {
 	unsigned char pntbuf[64];
@@ -1396,7 +1430,7 @@ vg_ocl_put_point_tpa(unsigned char *buf, int cell, const EC_POINT *ppnt)
 		       4);
 }
 
-static void
+void
 vg_ocl_get_point_tpa(EC_POINT *ppnt, const unsigned char *buf, int cell)
 {
 	unsigned char pntbuf[64];
@@ -1438,8 +1472,7 @@ show_elapsed(struct timeval *tv, const char *place)
  *  + Fast, minimal work for CPU.
  */
 
-static int
-vg_ocl_gethash_check(vg_ocl_context_t *vocp, int slot)
+int vg_ocl_gethash_check(vg_ocl_context_t *vocp, int slot)
 {
 	vg_exec_context_t *vxcp = &vocp->base;
 	vg_context_t *vcp = vocp->base.vxc_vc;
@@ -1473,8 +1506,7 @@ vg_ocl_gethash_check(vg_ocl_context_t *vocp, int slot)
 	return res;
 }
 
-static int
-vg_ocl_gethash_init(vg_ocl_context_t *vocp)
+int vg_ocl_gethash_init(vg_ocl_context_t *vocp)
 {
 	int i;
 
@@ -1483,7 +1515,7 @@ vg_ocl_gethash_init(vg_ocl_context_t *vocp)
 
 	for (i = 0; i < vocp->voc_nslots; i++) {
 		/* Each slot gets its own hash output buffer */
-		if (!vg_ocl_kernel_arg_alloc(vocp, i, 0,
+		if (!vg_ocl_kernel_arg_alloc(vocp, i, A_FOUND,
 					     2/*compressed&uncompressed */ * 20 *
 					     vocp->voc_ocl_rows *
 					     vocp->voc_ocl_cols, 1))
@@ -1495,19 +1527,21 @@ vg_ocl_gethash_init(vg_ocl_context_t *vocp)
 	return 1;
 }
 
+#define OCL_CHECK(result) {cl_int ret = result; \
+	if (ret!=CL_SUCCESS) { fprintf(stderr, "file: %s line: %d\n", __FILE__, __LINE__); vg_ocl_error(vocp, ret, NULL);}\
+	}
 
-static int
-vg_ocl_prefix_rekey(vg_ocl_context_t *vocp)
+int vg_ocl_prefix_rekey(vg_ocl_context_t *vocp)
 {
 	vg_context_t *vcp = vocp->base.vxc_vc;
 	unsigned char *ocl_targets_in;
 	uint32_t *ocl_found_out;
 	int i;
-
+	
 	/* Set the found indicator for each slot to -1 */
 	for (i = 0; i < vocp->voc_nslots; i++) {
 		ocl_found_out = (uint32_t *)
-			vg_ocl_map_arg_buffer(vocp, i, 0, 1);
+			vg_ocl_map_arg_buffer(vocp, i, A_FOUND, 1);
 		if (!ocl_found_out) {
 			fprintf(stderr,
 				"ERROR: Could not map result buffer"
@@ -1515,113 +1549,126 @@ vg_ocl_prefix_rekey(vg_ocl_context_t *vocp)
 			return -1;
 		}
 		ocl_found_out[0] = 0xffffffff;
-		vg_ocl_unmap_arg_buffer(vocp, i, 0, ocl_found_out);
+		vg_ocl_unmap_arg_buffer(vocp, i, A_FOUND, ocl_found_out);
 	}
 
 	if (vocp->voc_pattern_rewrite) {
-		/* Count number of range records */
-		i = vg_context_hash160_sort(vcp, NULL);
-		if (!i)
-			return 0;
+                /* (re)allocate target buffer */
+                if (!vg_ocl_kernel_arg_alloc(vocp, -1, A_ADDRESSES, 20 * vcp->vc_npatterns, 0))
+                        return -1;
+                
+                /* (re)allocate bitmap buffer */
+                if (!vg_ocl_kernel_arg_alloc(vocp, -1, A_BITMAP, vocp->voc_ocl_bitmap_size/8, 0))
+                        return -1;
+		
+                vocp->voc_pattern_alloc = i;
 
-		if (i > vocp->voc_pattern_alloc) {
-			/* (re)allocate target buffer */
-			if (!vg_ocl_kernel_arg_alloc(vocp, -1, 5, 40 * i, 0))
-				return -1;
-			vocp->voc_pattern_alloc = i;
-		}
-
-		/* Write range records */
-		ocl_targets_in = (unsigned char *)
-			vg_ocl_map_arg_buffer(vocp, 0, 5, 1);
+		/* Write patterns */
+		ocl_targets_in = (unsigned char *)vg_ocl_map_arg_buffer(vocp, 0, A_ADDRESSES, 1);
 		if (!ocl_targets_in) {
 			fprintf(stderr,
 				"ERROR: Could not map hash target buffer\n");
 			return -1;
 		}
-		vg_context_hash160_sort(vcp, ocl_targets_in);
-		vg_ocl_unmap_arg_buffer(vocp, 0, 5, ocl_targets_in);
-		vg_ocl_kernel_int_arg(vocp, -1, 4, i);
+                memcpy(ocl_targets_in, vcp->patterns, vcp->vc_npatterns*20);
+		vg_ocl_unmap_arg_buffer(vocp, 0, A_ADDRESSES, ocl_targets_in);
+		vg_ocl_kernel_int_arg(vocp, -1, A_ADDRESS_COUNT, vcp->vc_npatterns);
+		vg_ocl_kernel_long_arg(vocp, -1, A_BITMAP_LEN, vocp->voc_ocl_bitmap_size);
+
+		// fill_bitmap
+		size_t globalws[1] = {1024};
+		OCL_CHECK(clEnqueueNDRangeKernel(vocp->voc_oclcmdq,
+				     vocp->voc_oclkernel[0][2],
+				     1,
+				     NULL, globalws, NULL,
+				     0, NULL,
+				     NULL));
 
 		vocp->voc_pattern_rewrite = 0;
 	}
 	return 1;
 }
 
-static int
-vg_ocl_prefix_check(vg_ocl_context_t *vocp, int slot)
+int vg_ocl_prefix_check(vg_ocl_context_t *vocp, int slot)
 {
 	vg_exec_context_t *vxcp = &vocp->base;
 	vg_context_t *vcp = vocp->base.vxc_vc;
 	vg_test_func_t test_func = vcp->vc_test;
-	uint32_t *ocl_found_out;
-	uint32_t found_delta;
-	int orig_delta, tablesize;
+	int *ocl_found_out;
+	int found_count;
 	int res = 0;
 
 	/* Retrieve the found indicator */
-	ocl_found_out = (uint32_t *)
-		vg_ocl_map_arg_buffer(vocp, slot, 0, 2);
+	ocl_found_out = (uint32_t *)vg_ocl_map_arg_buffer(vocp, slot, A_FOUND, 2);
 	if (!ocl_found_out) {
 		fprintf(stderr,
 			"ERROR: Could not map result buffer"
 			" for slot %d\n", slot);
 		return 2;
 	}
-	found_delta = ocl_found_out[0];
+	found_count = ocl_found_out[0];
+	ocl_found_out[0] = -1;
 
-	if (found_delta != 0xffffffff) {
+	if (found_count != -1) {
+		found_count = -found_count-1;
+		if (vocp->base.vxc_vc->vc_verbose > 1) printf("\nFound %d candidadtes, check on CPU\n", found_count);
 		/* GPU code claims match, verify with CPU version */
-		orig_delta = vxcp->vxc_delta;
-		vxcp->vxc_delta += found_delta;
+		int orig_delta = vxcp->vxc_delta;
                 res = 0;
-                for (vxcp->vc_combined_compressed=0; vxcp->vc_combined_compressed<2 && !res; vxcp->vc_combined_compressed++) {
-                        vg_exec_context_calc_address(vxcp);
+		
+		BIGNUM * save_pkey = BN_dup(EC_KEY_get0_private_key(vxcp->vxc_key));
+		
+		for (int i=0; i<found_count; i++) {
+			vxcp->vxc_delta = orig_delta+ocl_found_out[1+i];
+			for (vxcp->vc_combined_compressed=0; vxcp->vc_combined_compressed<2 && !res; vxcp->vc_combined_compressed++) {
+				vg_exec_context_calc_address(vxcp);
 
-                        /* Make sure the GPU produced the expected hash */
-                        if (!memcmp(vxcp->vxc_binres + 1,
-                                    ocl_found_out + 2,
-                                    20)) {
-                                res = test_func(vxcp);
-                        }
-                }
-		if (res == 0) {
-			/*
-			 * The match was not found in
-			 * the pattern list.  Hmm.
-			 */
-			tablesize = ocl_found_out[2];
-			fprintf(stderr, "Match idx: %d\n", ocl_found_out[1]);
-			fprintf(stderr, "CPU hash: ");
-			fdumphex(stderr, vxcp->vxc_binres + 1, 20);
-			fprintf(stderr, "GPU hash: ");
-			fdumphex(stderr,
-				 (unsigned char *) (ocl_found_out + 2), 20);
-			fprintf(stderr, "Found delta: %d "
-			       "Start delta: %d\n",
-			       found_delta, orig_delta);
-			res = 1;
+				/* Make sure the GPU produced the expected hash */
+				if (test_func(vxcp)) {
+
+					char privkey_buf[VG_PROTKEY_MAX_B58];
+					char addr_buf[64];
+					EC_POINT * ppnt = (EC_POINT *) EC_KEY_get0_public_key(vxcp->vxc_key);
+					if (vxcp->vc_combined_compressed) {
+						vg_encode_address_compressed(ppnt,
+							EC_KEY_get0_group(vxcp->vxc_key),
+							vcp->vc_pubkeytype, addr_buf);
+						vg_encode_privkey_compressed(vxcp->vxc_key, vcp->vc_privtype, privkey_buf);
+					} else {
+						vg_encode_address(ppnt,
+							EC_KEY_get0_group(vxcp->vxc_key),
+							vcp->vc_pubkeytype, addr_buf);
+						vg_encode_privkey(vxcp->vxc_key, vcp->vc_privtype, privkey_buf);
+					}
+					//printf("Address: %s\nPrivkey: %s\n", addr_buf, privkey_buf);
+					res = 1;
+				}
+			}
+			vg_set_privkey(save_pkey, vxcp->vxc_key);
 		}
-	} else {
-		vxcp->vxc_delta += (vocp->voc_ocl_cols * vocp->voc_ocl_rows);
+		vxcp->vxc_delta = 1;
+		if (!res) if (vocp->base.vxc_vc->vc_verbose > 1) printf("CPU check failed :(\n");
+                vg_set_privkey(save_pkey, vxcp->vxc_key);
+		BN_free(save_pkey);
+		vxcp->vxc_delta = orig_delta;
+		
 	}
+	vxcp->vxc_delta += (vocp->voc_ocl_cols * vocp->voc_ocl_rows);
 
-	vg_ocl_unmap_arg_buffer(vocp, slot, 0, ocl_found_out);
+	vg_ocl_unmap_arg_buffer(vocp, slot, A_FOUND, ocl_found_out);
+
 	return res;
 }
 
-static int
-vg_ocl_prefix_init(vg_ocl_context_t *vocp)
+int vg_ocl_prefix_init(vg_ocl_context_t *vocp)
 {
 	int i;
 
-	if (!vg_ocl_create_kernel(vocp, 2, "hash_ec_point_search_prefix"))
+	if (!vg_ocl_create_kernel(vocp, 2, "fill_bitmap"))
 		return 0;
 
-	for (i = 0; i < vocp->voc_nslots; i++) {
-		if (!vg_ocl_kernel_arg_alloc(vocp, i, 0, 28, 1))
-			return 0;
-	}
+	if (!vg_ocl_kernel_arg_alloc(vocp, -1, A_FOUND, 2049, 1))
+		return 0;
 	vocp->voc_rekey_func = vg_ocl_prefix_rekey;
 	vocp->voc_check_func = vg_ocl_prefix_check;
 	vocp->voc_pattern_rewrite = 1;
@@ -1630,32 +1677,12 @@ vg_ocl_prefix_init(vg_ocl_context_t *vocp)
 }
 
 
-static int
-vg_ocl_config_pattern(vg_ocl_context_t *vocp)
-{
-	vg_context_t *vcp = vocp->base.vxc_vc;
-	int i;
-
-	i = vg_context_hash160_sort(vcp, NULL);
-	if (i > 0) {
-		if (vcp->vc_verbose > 1)
-			fprintf(stderr, "Using OpenCL prefix matcher\n");
-		/* Configure for prefix matching */
-		return vg_ocl_prefix_init(vocp);
-	}
-
-	if (vcp->vc_verbose > 0)
-		fprintf(stderr, "WARNING: Using CPU pattern matcher\n");
-	return vg_ocl_gethash_init(vocp);
-}
-
-
 /*
  * Temporary buffer content verification functions
  * This provides a simple test of the kernel, the OpenCL compiler,
  * and the hardware.
  */
-static int
+int
 vg_ocl_verify_temporary(vg_ocl_context_t *vocp, int slot, int z_inverted)
 {
 	vg_exec_context_t *vxcp = &vocp->base;
@@ -1809,110 +1836,28 @@ out:
 	return ret;
 }
 
-static int
+int
 vg_ocl_verify_k0(vg_ocl_context_t *vocp, int slot)
 {
 	return vg_ocl_verify_temporary(vocp, slot, 0);
 }
 
-static int
+int
 vg_ocl_verify_k1(vg_ocl_context_t *vocp, int slot)
 {
 	return vg_ocl_verify_temporary(vocp, slot, 1);
 }
 
-static void *
-vg_opencl_thread(void *arg)
-{
-	vg_ocl_context_t *vocp = (vg_ocl_context_t *) arg;
-	vg_context_t *vcp = vocp->base.vxc_vc;
-	int halt = 0;
-	int slot = -1;
-	int rows, cols, invsize;
-	unsigned long long idleu, busyu;
-	double pidle;
-	struct timeval tv, tvt, tvd, idle, busy;
-
-	memset(&idle, 0, sizeof(idle));
-	memset(&busy, 0, sizeof(busy));
-
-	while (1) {
-		pthread_mutex_lock(&vocp->voc_lock);
-		if (halt) {
-			halt = 0;
-			vocp->voc_halt = 1;
-		}
-		if (slot != -1) {
-			assert(vocp->voc_ocl_slot == slot);
-			vocp->voc_ocl_slot = -1;
-			slot = -1;
-			pthread_cond_signal(&vocp->voc_wait);
-		}
-		if (vocp->voc_ocl_slot == -1) {
-			gettimeofday(&tv, NULL);
-			while (vocp->voc_ocl_slot == -1) {
-				if (vocp->voc_halt)
-					goto out;
-				pthread_cond_wait(&vocp->voc_wait,
-						  &vocp->voc_lock);
-			}
-			gettimeofday(&tvt, NULL);
-			timersub(&tvt, &tv, &tvd);
-			timeradd(&tvd, &idle, &idle);
-		}
-		slot = vocp->voc_ocl_slot;
-		rows = vocp->voc_ocl_rows;
-		cols = vocp->voc_ocl_cols;
-		invsize = vocp->voc_ocl_invsize;
-		pthread_mutex_unlock(&vocp->voc_lock);
-
-		gettimeofday(&tv, NULL);
-		if (!vg_ocl_kernel_start(vocp, slot, cols, rows, invsize))
-			halt = 1;
-
-		if (!vg_ocl_kernel_wait(vocp, slot))
-			halt = 1;
-
-		if (vcp->vc_verbose > 1) {
-			gettimeofday(&tvt, NULL);
-			timersub(&tvt, &tv, &tvd);
-			timeradd(&tvd, &busy, &busy);
-			if ((busy.tv_sec + idle.tv_sec) > 1) {
-				idleu = (1000000 * idle.tv_sec) + idle.tv_usec;
-				busyu = (1000000 * busy.tv_sec) + busy.tv_usec;
-				pidle = ((double) idleu) / (idleu + busyu);
-
-				if (pidle > 0.01) {
-					fprintf(stderr, "\rGPU idle: %.2f%%"
-					       "                              "
-				       "                                \n",
-					       100 * pidle);
-				}
-				memset(&idle, 0, sizeof(idle));
-				memset(&busy, 0, sizeof(busy));
-			}
-		}
-	}
-out:
-	pthread_mutex_unlock(&vocp->voc_lock);
-	return NULL;
-}
-
-
 /*
  * Address search thread main loop
  */
 
-static void *
+void *
 vg_opencl_loop(vg_exec_context_t *arg)
 {
 	vg_ocl_context_t *vocp = (vg_ocl_context_t *) arg;
-	int i;
+	int i, halt = 0, slot = 0;
 	int round, nrows, ncols;
-	int pattern_generation;
-
-	const BN_ULONG rekey_max = 100000000;
-	BN_ULONG npoints, rekey_at;
 
 	EC_KEY *pkey = NULL;
 	const EC_GROUP *pgroup;
@@ -1925,11 +1870,7 @@ vg_opencl_loop(vg_exec_context_t *arg)
 	vg_context_t *vcp = vocp->base.vxc_vc;
 	vg_exec_context_t *vxcp = &vocp->base;
 
-	int slot, nslots;
-	int slot_busy = 0, slot_done = 0, halt = 0;
-	int c = 0, output_interval = 1000;
-
-	struct timeval tvstart;
+	struct timeval tvstart, tv;
 
 	pkey = vxcp->vxc_key;
 	pgroup = EC_KEY_get0_group(pkey);
@@ -1937,19 +1878,7 @@ vg_opencl_loop(vg_exec_context_t *arg)
 
 	round = vocp->voc_ocl_rows * vocp->voc_ocl_cols;
 
-	if (!vcp->vc_remove_on_match &&
-	    (vcp->vc_chance >= 1.0f) &&
-	    (vcp->vc_chance < round) &&
-	    (vcp->vc_verbose > 0)) {
-		fprintf(stderr, "WARNING: low pattern difficulty\n");
-		fprintf(stderr,
-			"WARNING: better match throughput is possible "
-			"using vanitygen on the CPU\n");
-	}
-
-	slot = 0;
-	nslots = 2;
-	vocp->voc_nslots = nslots;
+	vocp->voc_nslots = 1;
 
 	nrows = vocp->voc_ocl_rows;
 	ncols = vocp->voc_ocl_cols;
@@ -1957,12 +1886,12 @@ vg_opencl_loop(vg_exec_context_t *arg)
 	ppbase = (EC_POINT **) malloc((nrows + ncols) *
 				      sizeof(EC_POINT*));
 	if (!ppbase)
-		goto enomem;
+		return NULL;
 
 	for (i = 0; i < (nrows + ncols); i++) {
 		ppbase[i] = EC_POINT_new(pgroup);
 		if (!ppbase[i])
-			goto enomem;
+			return NULL;
 	}
 
 	pprow = ppbase + ncols;
@@ -1970,7 +1899,7 @@ vg_opencl_loop(vg_exec_context_t *arg)
 	poffset = EC_POINT_new(pgroup);
 	pseek = EC_POINT_new(pgroup);
 	if (!pbatchinc || !poffset || !pseek)
-		goto enomem;
+		return NULL;
 
 	BN_set_word(&vxcp->vxc_bntmp, ncols);
 	EC_POINT_mul(pgroup, pbatchinc, &vxcp->vxc_bntmp, NULL, NULL,
@@ -1981,83 +1910,59 @@ vg_opencl_loop(vg_exec_context_t *arg)
 	EC_POINT_mul(pgroup, poffset, &vxcp->vxc_bntmp, NULL, NULL,
 		     vxcp->vxc_bnctx);
 	EC_POINT_make_affine(pgroup, poffset, vxcp->vxc_bnctx);
+	
+	if (!vg_ocl_prefix_init(vocp))
+		return NULL;
+	
+	if (!vg_ocl_kernel_arg_alloc(vocp, -1, A_COL, 32 * 2 * nrows, 1))
+		return NULL;
 
-	if (!vg_ocl_config_pattern(vocp))
-		goto enomem;
-
-	for (i = 0; i < nslots; i++) {
-		/*
-		 * Each work group gets its own:
-		 * - Column point array
-		 */
-		if (!vg_ocl_kernel_arg_alloc(vocp, i, 4, 32 * 2 * nrows, 1))
-			goto enomem;
-	}
-
-	/*
-	 * All instances share:
-	 * - The z_heap and point scratch spaces
-	 * - The row point array
-	 */
-	if (!vg_ocl_kernel_arg_alloc(vocp, -1, 1,
+	if (!vg_ocl_kernel_arg_alloc(vocp, -1, A_Z_HEAP,
 			     round_up_pow2(32 * 2 * round, 4096), 0) ||
-	    !vg_ocl_kernel_arg_alloc(vocp, -1, 2,
+	    !vg_ocl_kernel_arg_alloc(vocp, -1, A_POINTS,
 			     round_up_pow2(32 * 2 * round, 4096), 0) ||
-	    !vg_ocl_kernel_arg_alloc(vocp, -1, 3,
+	    !vg_ocl_kernel_arg_alloc(vocp, -1, A_ROW,
 			     round_up_pow2(32 * 2 * ncols, 4096), 1))
-		goto enomem;
+		return NULL;
 
-	npoints = 0;
-	rekey_at = 0;
 	vxcp->vxc_binres[0] = vcp->vc_addrtype;
 
-	if (pthread_create(&vocp->voc_ocl_thread, NULL,
-			   vg_opencl_thread, vocp))
-		goto enomem;
-
 	gettimeofday(&tvstart, NULL);
-
-l_rekey:
-	if (vocp->voc_rekey_func) {
-		switch (vocp->voc_rekey_func(vocp)) {
-		case 1:
-			break;
-		case 0:
-			goto nopatterns;
-		default:
-			goto enomem;
-		}
-	}
+        
+	vocp->voc_rekey_func(vocp);
 
 	vg_exec_context_upgrade_lock(vxcp);
 
-	pattern_generation = vcp->vc_pattern_generation;
-
-	/* Generate a new random private key */
-	EC_KEY_generate_key(pkey);
-	npoints = 0;
-
-	/* Determine rekey interval */
-	EC_GROUP_get_order(pgroup, &vxcp->vxc_bntmp, vxcp->vxc_bnctx);
-	BN_sub(&vxcp->vxc_bntmp2,
-	       &vxcp->vxc_bntmp,
-	       EC_KEY_get0_private_key(pkey));
-	rekey_at = BN_get_word(&vxcp->vxc_bntmp2);
-	if ((rekey_at == BN_MASK2) || (rekey_at > rekey_max))
-		rekey_at = rekey_max;
-	assert(rekey_at > 0);
-
-	EC_POINT_copy(ppbase[0], EC_KEY_get0_public_key(pkey));
-
-	vg_exec_context_downgrade_lock(vxcp);
-
-	if (vcp->vc_pubkey_base) {
-		EC_POINT_add(pgroup,
-			     ppbase[0],
-			     ppbase[0],
-			     vcp->vc_pubkey_base,
-			     vxcp->vxc_bnctx);
+#ifdef TRACE
+	{
+		// debug
+		const EC_POINT * pub = EC_KEY_get0_public_key(pkey);
+		printf("pubkey: (");
+		dumpbn(&pub->X);printf(",");
+		dumpbn(&pub->Y);printf(")\n");
+		EC_POINT * p = EC_POINT_new(pgroup);
+		EC_POINT_copy(p, EC_KEY_get0_public_key(pkey));
+		EC_POINT_make_affine(pgroup, p, vxcp->vxc_bnctx);
+		printf("pubkey(aff): (");
+		dumpbn(&p->X);printf(",");
+		dumpbn(&p->Y);printf(")\n");
+		char addr[100];
+		vg_encode_address(p, pgroup, 0, addr);
+		printf("Addr: %s\n", addr);
+		
 	}
+#endif
+	
+	const int niterations = 5;
+	
+	while (1) {
+	// key -= round*niterations
+	BN_set_word(&vxcp->vxc_bntmp, round*niterations);
+	BN_sub(&vxcp->vxc_bntmp2,
+	       EC_KEY_get0_private_key(pkey),
+	       &vxcp->vxc_bntmp);
+	vg_set_privkey(&vxcp->vxc_bntmp2, pkey);
+	EC_POINT_copy(ppbase[0], EC_KEY_get0_public_key(pkey));
 
 	/* Build the base array of sequential points */
 	for (i = 1; i < ncols; i++) {
@@ -2066,19 +1971,32 @@ l_rekey:
 			     ppbase[i-1],
 			     pgen, vxcp->vxc_bnctx);
 	}
-
+	
 	EC_POINTs_make_affine(pgroup, ncols, ppbase, vxcp->vxc_bnctx);
+	
+	for (i = 0; i < ncols; i++) {
+		if (EC_POINT_is_at_infinity(pgroup, ppbase[i])) {
+			printf("Infinity at %d\n", i);
+			break;
+		}
+		int ret = EC_POINT_is_on_curve(pgroup, ppbase[i], vxcp->vxc_bnctx);
+		if (!ret) {
+			printf("Not on curve at %d: ret=%d\n", i, ret);
+			break;
+		}
+	}
 
 	/* Fill the sequential point array */
 	ocl_points_in = (unsigned char *)
-		vg_ocl_map_arg_buffer(vocp, 0, 3, 1);
+		vg_ocl_map_arg_buffer(vocp, 0, A_ROW, 1);
 	if (!ocl_points_in) {
 		fprintf(stderr, "ERROR: Could not map column buffer\n");
-		goto enomem;
+		break;
 	}
+	if (vcp->vc_verbose > 1) printf("\nCopy %d sequential points to the device\n", ncols);
 	for (i = 0; i < ncols; i++)
 		vg_ocl_put_point_tpa(ocl_points_in, i, ppbase[i]);
-	vg_ocl_unmap_arg_buffer(vocp, 0, 3, ocl_points_in);
+	vg_ocl_unmap_arg_buffer(vocp, 0, A_ROW, ocl_points_in);
 
 	/*
 	 * Set up the initial row increment table.
@@ -2093,128 +2011,88 @@ l_rekey:
 			     pbatchinc, vxcp->vxc_bnctx);
 	}
 	EC_POINTs_make_affine(pgroup, nrows, pprow, vxcp->vxc_bnctx);
+	
+	/* Copy the row stride array to the device */
+	if (vcp->vc_verbose > 1) printf("\nCopy the row stride array to the device\n");
+	ocl_strides_in = (unsigned char *)
+		vg_ocl_map_arg_buffer(vocp, slot, A_COL, 1);
+	if (!ocl_strides_in) {
+		fprintf(stderr,
+			"ERROR: Could not map row buffer "
+			"for slot %d\n", slot);
+		break;
+	}
+	memset(ocl_strides_in, 0, 64*nrows);
+	for (i = 0; i < nrows; i++)
+		vg_ocl_put_point(ocl_strides_in + (64*i),
+				 pprow[i]);
+	vg_ocl_unmap_arg_buffer(vocp, slot, A_COL, ocl_strides_in);
+	
+
 	vxcp->vxc_delta = 1;
-	npoints = 1;
-	slot = 0;
-	slot_busy = 0;
-	slot_done = 0;
 
-	while (1) {
-		if (slot_done) {
-			assert(rekey_at > 0);
-			slot_done = 0;
-
-			/* Call the result check function */
-			switch (vocp->voc_check_func(vocp, slot)) {
-			case 1:
-				rekey_at = 0;
-				break;
-			case 2:
-				halt = 1;
-				break;
-			default:
-				break;
-			}
-
-			c += round;
-			if (!halt && (c >= output_interval)) {
-				output_interval =
-					vg_output_timing(vcp, c, &tvstart);
-				c = 0;
-			}
-			vg_exec_context_yield(vxcp);
-
-			/* If the patterns changed, reload it to the GPU */
-			if (vocp->voc_rekey_func &&
-			    (pattern_generation !=
-			     vcp->vc_pattern_generation)) {
-				vocp->voc_pattern_rewrite = 1;
-				rekey_at = 0;
-			}
-		}
-
+	for (int iter = 0; iter<niterations; iter++) {
 		if (vcp->vc_halt)
 			halt = 1;
 		if (halt)
 			break;
 
-		if ((npoints + round) < rekey_at) {
-			if (npoints > 1) {
-				/* Move the row increments forward */
-				for (i = 0; i < nrows; i++) {
-					EC_POINT_add(pgroup,
-						     pprow[i],
-						     pprow[i],
-						     poffset,
-						     vxcp->vxc_bnctx);
-				}
+		gettimeofday(&tv, NULL);
+		
+		if (!vg_ocl_kernel_start(vocp, 0, ncols, nrows, vocp->voc_ocl_invsize))
+			halt = 1;
 
-				EC_POINTs_make_affine(pgroup, nrows, pprow,
-						      vxcp->vxc_bnctx);
-			}
+		/* Move the row increments forward */
+		for (i = 0; i < ncols; i++) {
+			EC_POINT_add(pgroup,
+				     ppbase[i],
+				     ppbase[i],
+				     poffset,
+				     vxcp->vxc_bnctx);
+		}
+		EC_POINTs_make_affine(pgroup, ncols, ppbase, vxcp->vxc_bnctx);
+		ocl_points_in = (unsigned char *)
+			vg_ocl_map_arg_buffer(vocp, 0, A_ROW, 1);
+		if (!ocl_points_in) {
+			fprintf(stderr, "ERROR: Could not map column buffer\n");
+			break;
+		}
+		if (vcp->vc_verbose > 1) printf("\nCopy %d sequential points to the device\n", ncols);
+		for (i = 0; i < ncols; i++)
+			vg_ocl_put_point_tpa(ocl_points_in, i, ppbase[i]);
+		vg_ocl_unmap_arg_buffer(vocp, 0, A_ROW, ocl_points_in);
 
-			/* Copy the row stride array to the device */
-			ocl_strides_in = (unsigned char *)
-				vg_ocl_map_arg_buffer(vocp, slot, 4, 1);
-			if (!ocl_strides_in) {
-				fprintf(stderr,
-					"ERROR: Could not map row buffer "
-					"for slot %d\n", slot);
-				goto enomem;
-			}
-			memset(ocl_strides_in, 0, 64*nrows);
-			for (i = 0; i < nrows; i++)
-				vg_ocl_put_point(ocl_strides_in + (64*i),
-						 pprow[i]);
-			vg_ocl_unmap_arg_buffer(vocp, slot, 4, ocl_strides_in);
-			npoints += round;
+		
+		// Wait for the GPU to complete its job
+		if (!vg_ocl_kernel_wait(vocp, slot))
+			halt = 1;
+		
+		/* Call the result check function */
+		switch (vocp->voc_check_func(vocp, 0)) {
+		case 1:
+			break;
+		case 2:
+			halt = 1;
+			break;
+		default:
+			break;
+		}
 
-			pthread_mutex_lock(&vocp->voc_lock);
-			while (vocp->voc_ocl_slot != -1) {
-				assert(slot_busy);
-				pthread_cond_wait(&vocp->voc_wait,
-						  &vocp->voc_lock);
-			}
+		vg_output_timing(vcp, round, &tvstart);
+		//vg_exec_context_yield(vxcp);
 
-			if (vocp->voc_halt) {
-				pthread_mutex_unlock(&vocp->voc_lock);
-				halt = 1;
-				break;
-			}
-
-			vocp->voc_ocl_slot = slot;
-			pthread_cond_signal(&vocp->voc_wait);
-			pthread_mutex_unlock(&vocp->voc_lock);
-
-			slot_done = slot_busy;
-			slot_busy = 1;
-			slot = (slot + 1) % nslots;
-
-		} else { 
-			if (slot_busy) {
-				pthread_mutex_lock(&vocp->voc_lock);
-				while (vocp->voc_ocl_slot != -1) {
-					assert(vocp->voc_ocl_slot ==
-					       ((slot + nslots - 1) % nslots));
-					pthread_cond_wait(&vocp->voc_wait,
-							  &vocp->voc_lock);
-				}
-				pthread_mutex_unlock(&vocp->voc_lock);
-				slot_busy = 0;
-				slot_done = 1;
-			}
-
-			if (!rekey_at ||
-			    (!slot_done && ((npoints + round) >= rekey_at)))
-				goto l_rekey;
+	}
+	
+	// save the priv. key to a file
+	if (save_file_name) {
+		char privkey_buf[128];
+		vg_encode_privkey(vxcp->vxc_key, vcp->vc_privtype, privkey_buf);
+		FILE *sf = fopen(save_file_name, "w");
+		if (sf) {
+			fputs(privkey_buf, sf);
+			fclose(sf);
 		}
 	}
-
-	if (0) {
-	enomem:
-		fprintf(stderr, "ERROR: allocation failure?\n");
-	nopatterns:
-		;
 	}
 
 	if (halt) {
@@ -2222,19 +2100,6 @@ l_rekey:
 			printf("Halting...");
 			fflush(stdout);
 		}
-		pthread_mutex_lock(&vocp->voc_lock);
-		vocp->voc_halt = 1;
-		pthread_cond_signal(&vocp->voc_wait);
-		while (vocp->voc_ocl_slot != -1) {
-			assert(slot_busy);
-			pthread_cond_wait(&vocp->voc_wait,
-					  &vocp->voc_lock);
-		}
-		slot_busy = 0;
-		pthread_mutex_unlock(&vocp->voc_lock);
-		pthread_join(vocp->voc_ocl_thread, NULL);
-		if (vcp->vc_verbose > 1)
-			printf("done!\n");
 	}
 
 	vg_exec_context_yield(vxcp);
@@ -2257,13 +2122,11 @@ l_rekey:
 }
 
 
-
-
 /*
  * OpenCL platform/device selection junk
  */
 
-static int
+int
 get_device_list(cl_platform_id pid, cl_device_id **list_out)
 {
 	cl_uint nd;
@@ -2294,7 +2157,7 @@ get_device_list(cl_platform_id pid, cl_device_id **list_out)
 	return nd;
 }
 
-static void
+void
 show_devices(cl_platform_id pid, cl_device_id *ids, int nd, int base)
 {
 	int i;
@@ -2322,7 +2185,7 @@ show_devices(cl_platform_id pid, cl_device_id *ids, int nd, int base)
 	}
 }
 
-static cl_device_id
+cl_device_id
 get_device(cl_platform_id pid, int num)
 {
 	int nd;
@@ -2350,7 +2213,7 @@ get_device(cl_platform_id pid, int num)
 	return NULL;
 }
 
-static int
+int
 get_platform_list(cl_platform_id **list_out)
 {
 	cl_uint np;
@@ -2414,7 +2277,7 @@ show_platforms(cl_platform_id *ids, int np, int base)
 	}
 }
 
-static cl_platform_id
+cl_platform_id
 get_platform(int num)
 {
 	int np;
@@ -2466,7 +2329,7 @@ vg_ocl_enumerate_devices(void)
 	}
 }
 
-static cl_device_id
+cl_device_id
 get_opencl_device(int platformidx, int deviceidx)
 {
 	cl_platform_id pid;
@@ -2481,12 +2344,13 @@ get_opencl_device(int platformidx, int deviceidx)
 	return NULL;
 }
 
+#define min(a, b) ((a)<(b)? a: b)
 
 vg_ocl_context_t *
 vg_ocl_context_new(vg_context_t *vcp,
 		   int platformidx, int deviceidx, int safe_mode, int verify,
 		   int worksize, int nthreads, int nrows, int ncols,
-		   int invsize)
+		   int invsize, char * start)
 {
 	cl_device_id did;
 	int round, full_threads, wsmult;
@@ -2573,12 +2437,14 @@ vg_ocl_context_new(vg_context_t *vcp,
 		else
 			worksize = 256;
 	}
-
+	
+	cl_ulong bitmapsize;
+	memsize = vg_ocl_device_getulong(vocp->voc_ocldid, CL_DEVICE_GLOBAL_MEM_SIZE);
+	allocsize = vg_ocl_device_getulong(vocp->voc_ocldid, CL_DEVICE_MAX_MEM_ALLOC_SIZE);
+	
 	if (!ncols) {
-		memsize = vg_ocl_device_getulong(vocp->voc_ocldid,
-					CL_DEVICE_GLOBAL_MEM_SIZE);
-		allocsize = vg_ocl_device_getulong(vocp->voc_ocldid,
-					CL_DEVICE_MAX_MEM_ALLOC_SIZE);
+		bitmapsize = min(allocsize, memsize/2);
+		memsize -= bitmapsize;
 		memsize /= 2;
 		ncols = full_threads;
 		nrows = 2;
@@ -2602,10 +2468,12 @@ vg_ocl_context_new(vg_context_t *vcp,
 				ncols *= 2;
 			wsmult *= 2;
 		}
+	} else {
+		bitmapsize = min(allocsize, memsize-(ncols * nrows * 2 * 128));
 	}
 
 	round = nrows * ncols;
-
+	
 	if (!invsize) {
 		invsize = 2;
 		while (!(round % (invsize << 1)) &&
@@ -2617,6 +2485,7 @@ vg_ocl_context_new(vg_context_t *vcp,
 		fprintf(stderr, "Grid size: %dx%d\n", ncols, nrows);
 		fprintf(stderr, "Modular inverse: %d threads, %d ops each\n",
 			round/invsize, invsize);
+		fprintf(stderr, "Bitmap size (bytes): %ld\n", bitmapsize);
 	}
 
 	if ((round % invsize) || !is_pow2(invsize) || (invsize < 2)) {
@@ -2640,7 +2509,14 @@ vg_ocl_context_new(vg_context_t *vcp,
 	vocp->voc_ocl_rows = nrows;
 	vocp->voc_ocl_cols = ncols;
 	vocp->voc_ocl_invsize = invsize;
-
+	vocp->voc_ocl_bitmap_size = bitmapsize*(long)8; // bits
+	
+	int addrtype = 128;
+	if (!vg_decode_privkey_any(vocp->base.vxc_key, &addrtype, start, NULL)) {
+		fprintf(stderr, "Wrong key format: %s\n", start);
+		goto out_fail;
+	}
+	
 	return vocp;
 
 out_fail:
@@ -2650,7 +2526,7 @@ out_fail:
 
 vg_ocl_context_t *
 vg_ocl_context_new_from_devstr(vg_context_t *vcp, const char *devstr,
-			       int safemode, int verify)
+			       int safemode, int verify, char * start)
 {
 	int platformidx, deviceidx;
 	int worksize = 0, nthreads = 0, nrows = 0, ncols = 0, invsize = 0;
@@ -2734,7 +2610,7 @@ vg_ocl_context_new_from_devstr(vg_context_t *vcp, const char *devstr,
 
 	return vg_ocl_context_new(vcp, platformidx, deviceidx, safemode,
 				  verify, worksize, nthreads, nrows, ncols,
-				  invsize);
+				  invsize, start);
 }
 
 

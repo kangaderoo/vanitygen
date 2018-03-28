@@ -177,6 +177,8 @@ vg_exec_context_init(vg_context_t *vcp, vg_exec_context_t *vxcp)
 void
 vg_exec_context_del(vg_exec_context_t *vxcp)
 {
+	printf("vg_exec_context_del\n");
+	
 	vg_exec_context_t *tp, **pprev;
 
 	if (vxcp->vxc_lockmode == 2)
@@ -399,12 +401,10 @@ void
 vg_output_timing_console(vg_context_t *vcp, double count,
 			 unsigned long long rate, unsigned long long total)
 {
-	double prob, time, targ;
+	double targ;
 	char *unit;
 	char linebuf[80];
-	int rem, p, i;
-
-	const double targs[] = { 0.5, 0.75, 0.8, 0.9, 0.95, 1.0 };
+	int rem, p;
 
 	targ = rate;
 	unit = "key/s";
@@ -424,76 +424,6 @@ vg_output_timing_console(vg_context_t *vcp, double count,
 	rem -= p;
 	if (rem < 0)
 		rem = 0;
-
-	if (vcp->vc_chance >= 1.0) {
-		prob = 1.0f - exp(-count/vcp->vc_chance);
-
-		if (prob <= 0.999) {
-			p = snprintf(&linebuf[p], rem, "[Prob %.1f%%]",
-				     prob * 100);
-			assert(p > 0);
-			rem -= p;
-			if (rem < 0)
-				rem = 0;
-			p = sizeof(linebuf) - rem;
-		}
-
-		for (i = 0; i < sizeof(targs)/sizeof(targs[0]); i++) {
-			targ = targs[i];
-			if ((targ < 1.0) && (prob <= targ))
-				break;
-		}
-
-		if (targ < 1.0) {
-			time = ((-vcp->vc_chance * log(1.0 - targ)) - count) /
-				rate;
-			unit = "s";
-			if (time > 60) {
-				time /= 60;
-				unit = "min";
-				if (time > 60) {
-					time /= 60;
-					unit = "h";
-					if (time > 24) {
-						time /= 24;
-						unit = "d";
-						if (time > 365) {
-							time /= 365;
-							unit = "y";
-						}
-					}
-				}
-			}
-
-			if (time > 1000000) {
-				p = snprintf(&linebuf[p], rem,
-					     "[%d%% in %e%s]",
-					     (int) (100 * targ), time, unit);
-			} else {
-				p = snprintf(&linebuf[p], rem,
-					     "[%d%% in %.1f%s]",
-					     (int) (100 * targ), time, unit);
-			}
-			assert(p > 0);
-			rem -= p;
-			if (rem < 0)
-				rem = 0;
-			p = sizeof(linebuf) - rem;
-		}
-	}
-
-	if (vcp->vc_found) {
-		if (vcp->vc_remove_on_match)
-			p = snprintf(&linebuf[p], rem, "[Found %lld/%ld]",
-				     vcp->vc_found, vcp->vc_npatterns_start);
-		else
-			p = snprintf(&linebuf[p], rem, "[Found %lld]",
-				     vcp->vc_found);
-		assert(p > 0);
-		rem -= p;
-		if (rem < 0)
-			rem = 0;
-	}
 
 	if (rem) {
 		memset(&linebuf[sizeof(linebuf)-rem], 0x20, rem);
@@ -566,7 +496,7 @@ vg_output_match_console(vg_context_t *vcp, vg_exec_context_t *vxcp, const char *
 			vg_encode_privkey(pkey, vcp->vc_privtype, privkey_buf);
 	}
 
-	if (!vcp->vc_result_file || (vcp->vc_verbose > 0)) {
+	if (!vcp->vc_result_file || (vcp->vc_verbose > 1)) {
 		printf("\r%79s\rPattern: %s\n", "", pattern);
 	}
 
@@ -589,7 +519,7 @@ vg_output_match_console(vg_context_t *vcp, vg_exec_context_t *vxcp, const char *
 	if (!vcp->vc_result_file || (vcp->vc_verbose > 0)) {
 		if (isscript)
 			printf("P2SHAddress: %s\n", addr2_buf);
-		printf("Address: %s\n"
+		printf("\nAddress: %s\n"
 		       "%s: %s\n",
 		       addr_buf, keytype, privkey_buf);
 	}
@@ -629,23 +559,28 @@ int
 vg_context_add_patterns(vg_context_t *vcp,
 			const char ** const patterns, int npatterns)
 {
-	vcp->vc_pattern_generation++;
+	printf("Searching for %d addresses\n", npatterns);
+	vcp->patterns = (char*)calloc(20 /* address size */, npatterns);
+        for (int i=0; i<npatterns; i++) {
+                int len = strlen(patterns[i]);
+                while (len) if (strchr(" \r\n\t", patterns[i][len-1])) len--; else break;
+                if (len != 33 && len != 34) {
+                        printf("Wrong address length at line %d: %d (must be 33 or 34)\n", i+1, len);
+                        exit(-1);
+                }
+		char buf[21];
+                if (!vg_b58_decode_check(patterns[i], buf, 21)) return 0;
+		memcpy(vcp->patterns+i*20, buf+1, 20);
+        }
+        
 	return vcp->vc_add_patterns(vcp, patterns, npatterns);
 }
 
 void
 vg_context_clear_all_patterns(vg_context_t *vcp)
 {
-	vcp->vc_clear_all_patterns(vcp);
-	vcp->vc_pattern_generation++;
-}
-
-int
-vg_context_hash160_sort(vg_context_t *vcp, void *buf)
-{
-	if (!vcp->vc_hash160_sort)
-		return 0;
-	return vcp->vc_hash160_sort(vcp, buf);
+        free(vcp->patterns);
+        vcp->patterns = NULL;
 }
 
 int
@@ -693,278 +628,6 @@ vg_context_wait_for_completion(vg_context_t *vcp)
 
 
 /*
- * Find the bignum ranges that produce a given prefix.
- */
-static int
-get_prefix_ranges(int addrtype, const char *pfx, BIGNUM **result,
-		  BN_CTX *bnctx)
-{
-	int i, p, c;
-	int zero_prefix = 0;
-	int check_upper = 0;
-	int b58pow, b58ceil, b58top = 0;
-	int ret = -1;
-
-	BIGNUM bntarg, bnceil, bnfloor;
-	BIGNUM bnbase;
-	BIGNUM *bnap, *bnbp, *bntp;
-	BIGNUM *bnhigh = NULL, *bnlow = NULL, *bnhigh2 = NULL, *bnlow2 = NULL;
-	BIGNUM bntmp, bntmp2;
-
-	BN_init(&bntarg);
-	BN_init(&bnceil);
-	BN_init(&bnfloor);
-	BN_init(&bnbase);
-	BN_init(&bntmp);
-	BN_init(&bntmp2);
-
-	BN_set_word(&bnbase, 58);
-
-	p = strlen(pfx);
-
-	for (i = 0; i < p; i++) {
-		c = vg_b58_reverse_map[(int)pfx[i]];
-		if (c == -1) {
-			fprintf(stderr,
-				"Invalid character '%c' in prefix '%s'\n",
-				pfx[i], pfx);
-			goto out;
-		}
-		if (i == zero_prefix) {
-			if (c == 0) {
-				/* Add another zero prefix */
-				zero_prefix++;
-				if (zero_prefix > 19) {
-					fprintf(stderr,
-						"Prefix '%s' is too long\n",
-						pfx);
-					goto out;
-				}
-				continue;
-			}
-
-			/* First non-zero character */
-			b58top = c;
-			BN_set_word(&bntarg, c);
-
-		} else {
-			BN_set_word(&bntmp2, c);
-			BN_mul(&bntmp, &bntarg, &bnbase, bnctx);
-			BN_add(&bntarg, &bntmp, &bntmp2);
-		}
-	}
-
-	/* Power-of-two ceiling and floor values based on leading 1s */
-	BN_clear(&bntmp);
-	BN_set_bit(&bntmp, 200 - (zero_prefix * 8));
-	BN_sub(&bnceil, &bntmp, BN_value_one());
-	BN_set_bit(&bnfloor, 192 - (zero_prefix * 8));
-
-	bnlow = BN_new();
-	bnhigh = BN_new();
-
-	if (b58top) {
-		/*
-		 * If a non-zero was given in the prefix, find the
-		 * numeric boundaries of the prefix.
-		 */
-
-		BN_copy(&bntmp, &bnceil);
-		bnap = &bntmp;
-		bnbp = &bntmp2;
-		b58pow = 0;
-		while (BN_cmp(bnap, &bnbase) > 0) {
-			b58pow++;
-			BN_div(bnbp, NULL, bnap, &bnbase, bnctx);
-			bntp = bnap;
-			bnap = bnbp;
-			bnbp = bntp;
-		}
-		b58ceil = BN_get_word(bnap);
-
-		if ((b58pow - (p - zero_prefix)) < 6) {
-			/*
-			 * Do not allow the prefix to constrain the
-			 * check value, this is ridiculous.
-			 */
-			fprintf(stderr, "Prefix '%s' is too long\n", pfx);
-			goto out;
-		}
-
-		BN_set_word(&bntmp2, b58pow - (p - zero_prefix));
-		BN_exp(&bntmp, &bnbase, &bntmp2, bnctx);
-		BN_mul(bnlow, &bntmp, &bntarg, bnctx);
-		BN_sub(&bntmp2, &bntmp, BN_value_one());
-		BN_add(bnhigh, bnlow, &bntmp2);
-
-		if (b58top <= b58ceil) {
-			/* Fill out the upper range too */
-			check_upper = 1;
-			bnlow2 = BN_new();
-			bnhigh2 = BN_new();
-
-			BN_mul(bnlow2, bnlow, &bnbase, bnctx);
-			BN_mul(&bntmp2, bnhigh, &bnbase, bnctx);
-			BN_set_word(&bntmp, 57);
-			BN_add(bnhigh2, &bntmp2, &bntmp);
-
-			/*
-			 * Addresses above the ceiling will have one
-			 * fewer "1" prefix in front than we require.
-			 */
-			if (BN_cmp(&bnceil, bnlow2) < 0) {
-				/* High prefix is above the ceiling */
-				check_upper = 0;
-				BN_free(bnhigh2);
-				bnhigh2 = NULL;
-				BN_free(bnlow2);
-				bnlow2 = NULL;
-			}
-			else if (BN_cmp(&bnceil, bnhigh2) < 0)
-				/* High prefix is partly above the ceiling */
-				BN_copy(bnhigh2, &bnceil);
-
-			/*
-			 * Addresses below the floor will have another
-			 * "1" prefix in front instead of our target.
-			 */
-			if (BN_cmp(&bnfloor, bnhigh) >= 0) {
-				/* Low prefix is completely below the floor */
-				assert(check_upper);
-				check_upper = 0;
-				BN_free(bnhigh);
-				bnhigh = bnhigh2;
-				bnhigh2 = NULL;
-				BN_free(bnlow);
-				bnlow = bnlow2;
-				bnlow2 = NULL;
-			}			
-			else if (BN_cmp(&bnfloor, bnlow) > 0) {
-				/* Low prefix is partly below the floor */
-				BN_copy(bnlow, &bnfloor);
-			}
-		}
-
-	} else {
-		BN_copy(bnhigh, &bnceil);
-		BN_clear(bnlow);
-	}
-
-	/* Limit the prefix to the address type */
-	BN_clear(&bntmp);
-	BN_set_word(&bntmp, addrtype);
-	BN_lshift(&bntmp2, &bntmp, 192);
-
-	if (check_upper) {
-		if (BN_cmp(&bntmp2, bnhigh2) > 0) {
-			check_upper = 0;
-			BN_free(bnhigh2);
-			bnhigh2 = NULL;
-			BN_free(bnlow2);
-			bnlow2 = NULL;
-		}
-		else if (BN_cmp(&bntmp2, bnlow2) > 0)
-			BN_copy(bnlow2, &bntmp2);
-	}
-
-	if (BN_cmp(&bntmp2, bnhigh) > 0) {
-		if (!check_upper)
-			goto not_possible;
-		check_upper = 0;
-		BN_free(bnhigh);
-		bnhigh = bnhigh2;
-		bnhigh2 = NULL;
-		BN_free(bnlow);
-		bnlow = bnlow2;
-		bnlow2 = NULL;
-	}
-	else if (BN_cmp(&bntmp2, bnlow) > 0) {
-		BN_copy(bnlow, &bntmp2);
-	}
-
-	BN_set_word(&bntmp, addrtype + 1);
-	BN_lshift(&bntmp2, &bntmp, 192);
-
-	if (check_upper) {
-		if (BN_cmp(&bntmp2, bnlow2) < 0) {
-			check_upper = 0;
-			BN_free(bnhigh2);
-			bnhigh2 = NULL;
-			BN_free(bnlow2);
-			bnlow2 = NULL;
-		}
-		else if (BN_cmp(&bntmp2, bnhigh2) < 0)
-			BN_copy(bnlow2, &bntmp2);
-	}
-
-	if (BN_cmp(&bntmp2, bnlow) < 0) {
-		if (!check_upper)
-			goto not_possible;
-		check_upper = 0;
-		BN_free(bnhigh);
-		bnhigh = bnhigh2;
-		bnhigh2 = NULL;
-		BN_free(bnlow);
-		bnlow = bnlow2;
-		bnlow2 = NULL;
-	}
-	else if (BN_cmp(&bntmp2, bnhigh) < 0) {
-		BN_copy(bnhigh, &bntmp2);
-	}
-
-	/* Address ranges are complete */
-	assert(check_upper || ((bnlow2 == NULL) && (bnhigh2 == NULL)));
-	result[0] = bnlow;
-	result[1] = bnhigh;
-	result[2] = bnlow2;
-	result[3] = bnhigh2;
-	bnlow = NULL;
-	bnhigh = NULL;
-	bnlow2 = NULL;
-	bnhigh2 = NULL;
-	ret = 0;
-
-	if (0) {
-	not_possible:
-		ret = -2;
-	}
-
-out:
-	BN_clear_free(&bntarg);
-	BN_clear_free(&bnceil);
-	BN_clear_free(&bnfloor);
-	BN_clear_free(&bnbase);
-	BN_clear_free(&bntmp);
-	BN_clear_free(&bntmp2);
-	if (bnhigh)
-		BN_free(bnhigh);
-	if (bnlow)
-		BN_free(bnlow);
-	if (bnhigh2)
-		BN_free(bnhigh2);
-	if (bnlow2)
-		BN_free(bnlow2);
-
-	return ret;
-}
-
-static void
-free_ranges(BIGNUM **ranges)
-{
-	BN_free(ranges[0]);
-	BN_free(ranges[1]);
-	ranges[0] = NULL;
-	ranges[1] = NULL;
-	if (ranges[2]) {
-		BN_free(ranges[2]);
-		BN_free(ranges[3]);
-		ranges[2] = NULL;
-		ranges[3] = NULL;
-	}
-}
-
-
-/*
  * Address prefix AVL tree node
  */
 
@@ -974,32 +637,35 @@ typedef struct _vg_prefix_s {
 	avl_item_t		vp_item;
 	struct _vg_prefix_s	*vp_sibling;
 	const char		*vp_pattern;
-	BIGNUM			*vp_low;
-	BIGNUM			*vp_high;
 } vg_prefix_t;
 
 static void
 vg_prefix_free(vg_prefix_t *vp)
 {
-	if (vp->vp_low)
-		BN_free(vp->vp_low);
-	if (vp->vp_high)
-		BN_free(vp->vp_high);
 	free(vp);
 }
 
+int str_cmp(const char * a, const char * b) {
+	for (int i=0; a[i] || b[i]; i++) {
+		if (a[i]<b[i]) return -1;
+		if (a[i]>b[i]) return 1;
+	}
+	return 0;
+}
+
 static vg_prefix_t *
-vg_prefix_avl_search(avl_root_t *rootp, BIGNUM *targ)
+vg_prefix_avl_search(avl_root_t *rootp, char * pattern)
 {
 	vg_prefix_t *vp;
 	avl_item_t *itemp = rootp->ar_root;
 
 	while (itemp) {
 		vp = avl_item_entry(itemp, vg_prefix_t, vp_item);
-		if (BN_cmp(vp->vp_low, targ) > 0) {
+		int cmp = str_cmp(pattern, vp->vp_pattern);
+		if (cmp < 0) {
 			itemp = itemp->ai_left;
 		} else {
-			if (BN_cmp(vp->vp_high, targ) < 0) {
+			if (cmp > 0) {
 				itemp = itemp->ai_right;
 			} else
 				return vp;
@@ -1019,10 +685,11 @@ vg_prefix_avl_insert(avl_root_t *rootp, vg_prefix_t *vpnew)
 		itemp = *ptrp;
 //		ptrp = &itemp->ai_left;
 		vp = avl_item_entry(itemp, vg_prefix_t, vp_item);
-		if (BN_cmp(vp->vp_low, vpnew->vp_high) > 0) {
+		int cmp = str_cmp(vpnew->vp_pattern, vp->vp_pattern);
+		if (cmp < 0) {
 			ptrp = &itemp->ai_left;
 		} else {
-			if (BN_cmp(vp->vp_high, vpnew->vp_low) < 0) {
+			if (cmp > 0) {
 				ptrp = &itemp->ai_right;
 			} else
 				return vp;
@@ -1037,37 +704,14 @@ vg_prefix_avl_insert(avl_root_t *rootp, vg_prefix_t *vpnew)
 }
 
 static vg_prefix_t *
-vg_prefix_first(avl_root_t *rootp)
-{
-	avl_item_t *itemp;
-	itemp = avl_first(rootp);
-	if (itemp)
-		return avl_item_entry(itemp, vg_prefix_t, vp_item);
-	return NULL;
-}
-
-static vg_prefix_t *
-vg_prefix_next(vg_prefix_t *vp)
-{
-	avl_item_t *itemp = &vp->vp_item;
-	itemp = avl_next(itemp);
-	if (itemp)
-		return avl_item_entry(itemp, vg_prefix_t, vp_item);
-	return NULL;
-}
-
-static vg_prefix_t *
-vg_prefix_add(avl_root_t *rootp, const char *pattern, BIGNUM *low, BIGNUM *high)
+vg_prefix_add(avl_root_t *rootp, const char *pattern)
 {
 	vg_prefix_t *vp, *vp2;
-	assert(BN_cmp(low, high) < 0);
 	vp = (vg_prefix_t *) malloc(sizeof(*vp));
 	if (vp) {
 		avl_item_init(&vp->vp_item);
 		vp->vp_sibling = NULL;
 		vp->vp_pattern = pattern;
-		vp->vp_low = low;
-		vp->vp_high = high;
 		vp2 = vg_prefix_avl_insert(rootp, vp);
 		if (vp2 != NULL) {
 			fprintf(stderr,
@@ -1095,129 +739,6 @@ vg_prefix_delete(avl_root_t *rootp, vg_prefix_t *vp)
 	}
 	vg_prefix_free(vp);
 }
-
-static vg_prefix_t *
-vg_prefix_add_ranges(avl_root_t *rootp, const char *pattern, BIGNUM **ranges,
-		     vg_prefix_t *master)
-{
-	vg_prefix_t *vp, *vp2 = NULL;
-
-	assert(ranges[0]);
-	vp = vg_prefix_add(rootp, pattern, ranges[0], ranges[1]);
-	if (!vp)
-		return NULL;
-
-	if (ranges[2]) {
-		vp2 = vg_prefix_add(rootp, pattern, ranges[2], ranges[3]);
-		if (!vp2) {
-			vg_prefix_delete(rootp, vp);
-			return NULL;
-		}
-	}
-
-	if (!master) {
-		vp->vp_sibling = vp2;
-		if (vp2)
-			vp2->vp_sibling = vp;
-	} else if (vp2) {
-		vp->vp_sibling = vp2;
-		vp2->vp_sibling = (master->vp_sibling ? 
-				   master->vp_sibling :
-				   master);
-		master->vp_sibling = vp;
-	} else {
-		vp->vp_sibling = (master->vp_sibling ? 
-				  master->vp_sibling :
-				  master);
-		master->vp_sibling = vp;
-	}
-	return vp;
-}
-
-static void
-vg_prefix_range_sum(vg_prefix_t *vp, BIGNUM *result, BIGNUM *tmp1)
-{
-	vg_prefix_t *startp;
-
-	startp = vp;
-	BN_clear(result);
-	do {
-		BN_sub(tmp1, vp->vp_high, vp->vp_low);
-		BN_add(result, result, tmp1);
-		vp = vp->vp_sibling;
-	} while (vp && (vp != startp));
-}
-
-
-typedef struct _prefix_case_iter_s {
-	char	ci_prefix[32];
-	char	ci_case_map[32];
-	char	ci_nbits;
-	int	ci_value;
-} prefix_case_iter_t;
-
-static const unsigned char b58_case_map[256] = {
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 0, 1, 1, 2,
-	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0,
-	0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 2, 1, 1, 0,
-	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0,
-};
-
-static int
-prefix_case_iter_init(prefix_case_iter_t *cip, const char *pfx)
-{
-	int i;
-
-	cip->ci_nbits = 0;
-	cip->ci_value = 0;
-	for (i = 0; pfx[i]; i++) {
-		if (i > sizeof(cip->ci_prefix))
-			return 0;
-		if (!b58_case_map[(int)pfx[i]]) {
-			/* Character isn't case-swappable, ignore it */
-			cip->ci_prefix[i] = pfx[i];
-			continue;
-		}
-		if (b58_case_map[(int)pfx[i]] == 2) {
-			/* Character invalid, but valid in swapped case */
-			cip->ci_prefix[i] = pfx[i] ^ 0x20;
-			continue;
-		}
-		/* Character is case-swappable */
-		cip->ci_prefix[i] = pfx[i] | 0x20;
-		cip->ci_case_map[(int)cip->ci_nbits] = i;
-		cip->ci_nbits++;
-	}
-	cip->ci_prefix[i] = '\0';
-	return 1;
-}
-
-static int
-prefix_case_iter_next(prefix_case_iter_t *cip)
-{
-	unsigned long val, max, mask;
-	int i, nbits;
-
-	nbits = cip->ci_nbits;
-	max = (1UL << nbits) - 1;
-	val = cip->ci_value + 1;
-	if (val > max)
-		return 0;
-
-	for (i = 0, mask = 1; i < nbits; i++, mask <<= 1) {
-		if (val & mask)
-			cip->ci_prefix[(int)cip->ci_case_map[i]] &= 0xdf;
-		else
-			cip->ci_prefix[(int)cip->ci_case_map[i]] |= 0x20;
-	}
-	cip->ci_value = val;
-	return 1;
-}
-
 
 typedef struct _vg_prefix_context_s {
 	vg_context_t		base;
@@ -1262,221 +783,36 @@ vg_prefix_context_free(vg_context_t *vcp)
 	free(vcpp);
 }
 
-static void
-vg_prefix_context_next_difficulty(vg_prefix_context_t *vcpp,
-				  BIGNUM *bntmp, BIGNUM *bntmp2, BN_CTX *bnctx)
-{
-	char *dbuf;
-
-	BN_clear(bntmp);
-	BN_set_bit(bntmp, 192);
-	BN_div(bntmp2, NULL, bntmp, &vcpp->vcp_difficulty, bnctx);
-
-	dbuf = BN_bn2dec(bntmp2);
-	if (vcpp->base.vc_verbose > 0) {
-		if (vcpp->base.vc_npatterns > 1)
-			fprintf(stderr,
-				"Next match difficulty: %s (%ld prefixes)\n",
-				dbuf, vcpp->base.vc_npatterns);
-		else
-			fprintf(stderr, "Difficulty: %s\n", dbuf);
-	}
-	vcpp->base.vc_chance = atof(dbuf);
-	OPENSSL_free(dbuf);
-}
-
 static int
 vg_prefix_context_add_patterns(vg_context_t *vcp,
 			       const char ** const patterns, int npatterns)
 {
 	vg_prefix_context_t *vcpp = (vg_prefix_context_t *) vcp;
-	prefix_case_iter_t caseiter;
-	vg_prefix_t *vp, *vp2;
+	vg_prefix_t *vp;
 	BN_CTX *bnctx;
 	BIGNUM bntmp, bntmp2, bntmp3;
-	BIGNUM *ranges[4];
-	int ret = 0;
-	int i, impossible = 0;
-	int case_impossible;
-	unsigned long npfx;
-	char *dbuf;
+	int i;
 
 	bnctx = BN_CTX_new();
 	BN_init(&bntmp);
 	BN_init(&bntmp2);
 	BN_init(&bntmp3);
 
-	npfx = 0;
 	for (i = 0; i < npatterns; i++) {
-		if (!vcpp->vcp_caseinsensitive) {
-			vp = NULL;
-			ret = get_prefix_ranges(vcpp->base.vc_addrtype,
-						patterns[i],
-						ranges, bnctx);
-			if (!ret) {
-				vp = vg_prefix_add_ranges(&vcpp->vcp_avlroot,
-							  patterns[i],
-							  ranges, NULL);
-			}
-
-		} else {
-			/* Case-enumerate the prefix */
-			if (!prefix_case_iter_init(&caseiter, patterns[i])) {
-				fprintf(stderr,
-					"Prefix '%s' is too long\n",
-					patterns[i]);
-				continue;
-			}
-
-			if (caseiter.ci_nbits > 16) {
-				fprintf(stderr,
-					"WARNING: Prefix '%s' has "
-					"2^%d case-varied derivatives\n",
-					patterns[i], caseiter.ci_nbits);
-			}
-
-			case_impossible = 0;
-			vp = NULL;
-			do {
-				ret = get_prefix_ranges(vcpp->base.vc_addrtype,
-							caseiter.ci_prefix,
-							ranges, bnctx);
-				if (ret == -2) {
-					case_impossible++;
-					ret = 0;
-					continue;
-				}
-				if (ret)
-					break;
-				vp2 = vg_prefix_add_ranges(&vcpp->vcp_avlroot,
-							   patterns[i],
-							   ranges,
-							   vp);
-				if (!vp2) {
-					ret = -1;
-					break;
-				}
-				if (!vp)
-					vp = vp2;
-
-			} while (prefix_case_iter_next(&caseiter));
-
-			if (!vp && case_impossible)
-				ret = -2;
-
-			if (ret && vp) {
-				vg_prefix_delete(&vcpp->vcp_avlroot, vp);
-				vp = NULL;
-			}
-		}
-
-		if (ret == -2) {
-			fprintf(stderr,
-				"Prefix '%s' not possible\n", patterns[i]);
-			impossible++;
-		}
-
+		vp = vg_prefix_add(&vcpp->vcp_avlroot, patterns[i]);
 		if (!vp)
 			continue;
 
-		npfx++;
-
-		/* Determine the probability of finding a match */
-		vg_prefix_range_sum(vp, &bntmp, &bntmp2);
-		BN_add(&bntmp2, &vcpp->vcp_difficulty, &bntmp);
-		BN_copy(&vcpp->vcp_difficulty, &bntmp2);
-
-		if (vcp->vc_verbose > 1) {
-			BN_clear(&bntmp2);
-			BN_set_bit(&bntmp2, 192);
-			BN_div(&bntmp3, NULL, &bntmp2, &bntmp, bnctx);
-
-			dbuf = BN_bn2dec(&bntmp3);
-			fprintf(stderr,
-				"Prefix difficulty: %20s %s\n",
-				dbuf, patterns[i]);
-			OPENSSL_free(dbuf);
-		}
 	}
 
-	vcpp->base.vc_npatterns += npfx;
-	vcpp->base.vc_npatterns_start += npfx;
-
-	if (!npfx && impossible) {
-		const char *ats = "bitcoin", *bw = "\"1\"";
-		switch (vcpp->base.vc_addrtype) {
-		case 5:
-			ats = "bitcoin script";
-			bw = "\"3\"";
-			break;
-		case 111:
-			ats = "testnet";
-			bw = "\"m\" or \"n\"";
-			break;
-		case 52:
-			ats = "namecoin";
-			bw = "\"M\" or \"N\"";
-			break;
-		default:
-			break;
-		}
-		fprintf(stderr,
-			"Hint: valid %s addresses begin with %s\n", ats, bw);
-	}
-
-	if (npfx)
-		vg_prefix_context_next_difficulty(vcpp, &bntmp, &bntmp2, bnctx);
-
-	ret = (npfx != 0);
+	vcpp->base.vc_npatterns = npatterns;
 
 	BN_clear_free(&bntmp);
 	BN_clear_free(&bntmp2);
 	BN_clear_free(&bntmp3);
 	BN_CTX_free(bnctx);
-	return ret;
+	return 1;
 }
-
-double
-vg_prefix_get_difficulty(int addrtype, const char *pattern)
-{
-	BN_CTX *bnctx;
-	BIGNUM result, bntmp;
-	BIGNUM *ranges[4];
-	char *dbuf;
-	int ret;
-	double diffret = 0.0;
-
-	bnctx = BN_CTX_new();
-	BN_init(&result);
-	BN_init(&bntmp);
-
-	ret = get_prefix_ranges(addrtype,
-				pattern, ranges, bnctx);
-
-	if (ret == 0) {
-		BN_sub(&bntmp, ranges[1], ranges[0]);
-		BN_add(&result, &result, &bntmp);
-		if (ranges[2]) {
-			BN_sub(&bntmp, ranges[3], ranges[2]);
-			BN_add(&result, &result, &bntmp);
-		}
-		free_ranges(ranges);
-
-		BN_clear(&bntmp);
-		BN_set_bit(&bntmp, 192);
-		BN_div(&result, NULL, &bntmp, &result, bnctx);
-
-		dbuf = BN_bn2dec(&result);
-		diffret = strtod(dbuf, NULL);
-		OPENSSL_free(dbuf);
-	}
-
-	BN_clear_free(&result);
-	BN_clear_free(&bntmp);
-	BN_CTX_free(bnctx);
-	return diffret;
-}
-
 
 static int
 vg_prefix_test(vg_exec_context_t *vxcp)
@@ -1492,9 +828,11 @@ vg_prefix_test(vg_exec_context_t *vxcp)
 	 */
 
 	BN_bin2bn(vxcp->vxc_binres, 25, &vxcp->vxc_bntarg);
+	char addr[35];
+	vg_b58_encode_check(vxcp->vxc_binres, 21, addr);
 
 research:
-	vp = vg_prefix_avl_search(&vcpp->vcp_avlroot, &vxcp->vxc_bntarg);
+	vp = vg_prefix_avl_search(&vcpp->vcp_avlroot, addr);
 	if (vp) {
 		if (vg_exec_context_upgrade_lock(vxcp))
 			goto research;
@@ -1511,80 +849,12 @@ research:
 			return 2;
 		}
 
-		if (vcpp->base.vc_remove_on_match) {
-			/* Subtract the range from the difficulty */
-			vg_prefix_range_sum(vp,
-					    &vxcp->vxc_bntarg,
-					    &vxcp->vxc_bntmp);
-			BN_sub(&vxcp->vxc_bntmp,
-			       &vcpp->vcp_difficulty,
-			       &vxcp->vxc_bntarg);
-			BN_copy(&vcpp->vcp_difficulty, &vxcp->vxc_bntmp);
-
-			vg_prefix_delete(&vcpp->vcp_avlroot,vp);
-			vcpp->base.vc_npatterns--;
-
-			if (!avl_root_empty(&vcpp->vcp_avlroot))
-				vg_prefix_context_next_difficulty(
-					vcpp, &vxcp->vxc_bntmp,
-					&vxcp->vxc_bntmp2,
-					vxcp->vxc_bnctx);
-			vcpp->base.vc_pattern_generation++;
-		}
 		res = 1;
 	}
 	if (avl_root_empty(&vcpp->vcp_avlroot)) {
 		return 2;
 	}
 	return res;
-}
-
-static int
-vg_prefix_hash160_sort(vg_context_t *vcp, void *buf)
-{
-	vg_prefix_context_t *vcpp = (vg_prefix_context_t *) vcp;
-	vg_prefix_t *vp;
-	unsigned char *cbuf = (unsigned char *) buf;
-	unsigned char bnbuf[25];
-	int nbytes, ncopy, nskip, npfx = 0;
-
-	/*
-	 * Walk the prefix tree in order, copy the upper and lower bound
-	 * values into the hash160 buffer.  Skip the lower four bytes
-	 * and anything above the 24th byte.
-	 */
-	for (vp = vg_prefix_first(&vcpp->vcp_avlroot);
-	     vp != NULL;
-	     vp = vg_prefix_next(vp)) {
-		npfx++;
-		if (!buf)
-			continue;
-
-		/* Low */
-		nbytes = BN_bn2bin(vp->vp_low, bnbuf);
-		ncopy = ((nbytes >= 24) ? 20 :
-			 ((nbytes > 4) ? (nbytes - 4) : 0));
-		nskip = (nbytes >= 24) ? (nbytes - 24) : 0;
-		if (ncopy < 20)
-			memset(cbuf, 0, 20 - ncopy);
-		memcpy(cbuf + (20 - ncopy),
-		       bnbuf + nskip,
-		       ncopy);
-		cbuf += 20;
-
-		/* High */
-		nbytes = BN_bn2bin(vp->vp_high, bnbuf);
-		ncopy = ((nbytes >= 24) ? 20 :
-			 ((nbytes > 4) ? (nbytes - 4) : 0));
-		nskip = (nbytes >= 24) ? (nbytes - 24) : 0;
-		if (ncopy < 20)
-			memset(cbuf, 0, 20 - ncopy);
-		memcpy(cbuf + (20 - ncopy),
-		       bnbuf + nskip,
-		       ncopy);
-		cbuf += 20;
-	}
-	return npfx;
 }
 
 vg_context_t *
@@ -1606,7 +876,7 @@ vg_prefix_context_new(int addrtype, int privtype, int caseinsensitive)
 		vcpp->base.vc_clear_all_patterns =
 			vg_prefix_context_clear_all_patterns;
 		vcpp->base.vc_test = vg_prefix_test;
-		vcpp->base.vc_hash160_sort = vg_prefix_hash160_sort;
+		vcpp->base.vc_hash160_sort = NULL;
 		avl_root_init(&vcpp->vcp_avlroot);
 		BN_init(&vcpp->vcp_difficulty);
 		vcpp->vcp_caseinsensitive = caseinsensitive;

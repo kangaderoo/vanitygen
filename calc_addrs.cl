@@ -81,6 +81,8 @@
  */
 
 
+// #define TRACE
+ 
 /* Byte-swapping and endianness */
 #define bswap32(v)					\
 	(((v) >> 24) | (((v) >> 8) & 0xff00) |		\
@@ -183,7 +185,7 @@ __constant bn_word mont_rr[BN_NWORDS] = { 0xe90a1, 0x7a2, 0x1, 0, };
 __constant bn_word mont_n0[2] = { 0xd2253531, 0xd838091d };
 
 
-#define bn_is_odd(bn)		(bn.d[0] & 1)
+#define bn_is_odd(bn)		((bn).d[0] & 1)
 #define bn_is_even(bn) 		(!bn_is_odd(bn))
 #define bn_is_zero(bn) 		(!bn.d[0] && !bn.d[1] && !bn.d[2] && \
 				 !bn.d[3] && !bn.d[4] && !bn.d[5] && \
@@ -1038,6 +1040,13 @@ ec_add_grid(__global bn_word *points_out, __global bn_word *z_heap,
 	rx = col_in[i];
 	ry = col_in[i+1];
 
+#ifdef TRACE
+	if (get_global_id(1)==0 && get_global_id(0)==0) {
+		printf("GPU pgen(aff) x: %x %x %x %x %x %x %x %x\n", rx.d[0],rx.d[1],rx.d[2],rx.d[3],rx.d[4],rx.d[5],rx.d[6],rx.d[7]);
+		printf("GPU pgen(aff) y: %x %x %x %x %x %x %x %x\n", ry.d[0],ry.d[1],ry.d[2],ry.d[3],ry.d[4],ry.d[5],ry.d[6],ry.d[7]);
+	}
+#endif
+
 	cell = get_global_id(0);
 	start = ((((2 * cell) / ACCESS_STRIDE) * ACCESS_BUNDLE) +
 		 (cell % (ACCESS_STRIDE/2)));
@@ -1046,13 +1055,20 @@ ec_add_grid(__global bn_word *points_out, __global bn_word *z_heap,
 	x1.d[i] = row_in[start + (i*ACCESS_STRIDE)];
 
 	bn_unroll(ec_add_grid_inner_1);
+	
+#ifdef TRACE
+	if (get_global_id(1)==0 && get_global_id(0)==0) printf("GPU pub(aff) X: %x %x %x %x %x %x %x %x\n", x1.d[0],x1.d[1],x1.d[2],x1.d[3],x1.d[4],x1.d[5],x1.d[6],x1.d[7]);
+#endif
 	start += (ACCESS_STRIDE/2);
 
 #define ec_add_grid_inner_2(i) \
 	y1.d[i] = row_in[start + (i*ACCESS_STRIDE)];
 
 	bn_unroll(ec_add_grid_inner_2);
-
+	
+#ifdef TRACE
+	if (get_global_id(1)==0 && get_global_id(0)==0) printf("GPU pub(aff) Y: %x %x %x %x %x %x %x %x\n", y1.d[0],y1.d[1],y1.d[2],y1.d[3],y1.d[4],y1.d[5],y1.d[6],y1.d[7]);
+#endif
 	bn_mod_sub(&z, &x1, &rx);
 
 	cell += (get_global_id(1) * get_global_size(0));
@@ -1063,7 +1079,7 @@ ec_add_grid(__global bn_word *points_out, __global bn_word *z_heap,
 	z_heap[start + (i*ACCESS_STRIDE)] = z.d[i];
 
 	bn_unroll(ec_add_grid_inner_3);
-
+	
 	bn_mod_sub(&b, &y1, &ry);
 	bn_mod_add(&c, &x1, &rx);
 	bn_mod_add(&d, &y1, &ry);
@@ -1103,115 +1119,41 @@ ec_add_grid(__global bn_word *points_out, __global bn_word *z_heap,
 
 }
 
-__kernel void
-heap_invert(__global bn_word *z_heap, int batch)
+ulong get_hash_offset_global(__global uint * hash) {
+	return (((ulong)hash[1])<<32) + hash[2];
+}
+
+ulong get_hash_offset(uint * hash) {
+	return (((ulong)hash[1])<<32) + hash[2];
+}
+
+void set_bit(__global uchar *bitmap, ulong i)
 {
-	bignum a, b, c, z;
-	int i, off, lcell, hcell, start;
+	bitmap[i/8] |= 1<<((int)i&7);
+}
 
-#define heap_invert_inner_load_a(j)				\
-		a.d[j] = z_heap[start + j*ACCESS_STRIDE];
-#define heap_invert_inner_load_b(j)				\
-		b.d[j] = z_heap[start + j*ACCESS_STRIDE];
-#define heap_invert_inner_load_z(j)				\
-		z.d[j] = z_heap[start + j*ACCESS_STRIDE];
-#define heap_invert_inner_store_z(j)				\
-		z_heap[start + j*ACCESS_STRIDE] = z.d[j];
-#define heap_invert_inner_store_c(j)				\
-		z_heap[start + j*ACCESS_STRIDE] = c.d[j];
-
-	off = get_global_size(0);
-	lcell = get_global_id(0);
-	hcell = (off * batch) + lcell;
-	for (i = 0; i < (batch-1); i++) {
-
-		start = (((lcell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
-			 (lcell % ACCESS_STRIDE));
-
-		bn_unroll(heap_invert_inner_load_a);
-
-		lcell += off;
-		start = (((lcell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
-			 (lcell % ACCESS_STRIDE));
-
-		bn_unroll(heap_invert_inner_load_b);
-
-		bn_mul_mont(&z, &a, &b);
-
-		start = (((hcell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
-			 (hcell % ACCESS_STRIDE));
-
-		bn_unroll(heap_invert_inner_store_z);
-
-		lcell += off;
-		hcell += off;
+__kernel void
+fill_bitmap(__global uint *hashes, int nhashes, __global uchar *bitmap, ulong bitmap_len /* in bits */)
+{
+	for (int i=get_global_id(0); i<bitmap_len/8; i+=get_global_size(0)) {
+		bitmap[i] = 0;
 	}
+	
+	barrier(CLK_GLOBAL_MEM_FENCE);
+	
+	// sequential
+	if (get_global_id(0) == 0)
+		for (int i=0; i<nhashes; i++) {
+#ifdef TRACE
+			printf("fill addr: %x %x\n", hashes[i*5+1], hashes[i*5+2]);
+#endif
+			set_bit(bitmap, get_hash_offset_global(hashes+i*5)%bitmap_len);
+		}
+}
 
-	/* Invert the root, fix up 1/ZR -> R/Z */
-	bn_mod_inverse(&z, &z);
-
-#define heap_invert_inner_1(i)			\
-	a.d[i] = mont_rr[i];
-
-	bn_unroll(heap_invert_inner_1);
-
-	bn_mul_mont(&z, &z, &a);
-	bn_mul_mont(&z, &z, &a);
-
-	/* Unroll the first iteration to avoid a load/store on the root */
-	lcell -= (off << 1);
-	hcell -= (off << 1);
-
-	start = (((lcell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
-		 (lcell % ACCESS_STRIDE));
-	bn_unroll(heap_invert_inner_load_a);
-
-	lcell += off;
-	start = (((lcell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
-		 (lcell % ACCESS_STRIDE));
-	bn_unroll(heap_invert_inner_load_b);
-
-	bn_mul_mont(&c, &a, &z);
-
-	bn_unroll(heap_invert_inner_store_c);
-
-	bn_mul_mont(&c, &b, &z);
-
-	lcell -= off;
-	start = (((lcell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
-		 (lcell % ACCESS_STRIDE));
-	bn_unroll(heap_invert_inner_store_c);
-
-	lcell -= (off << 1);
-
-	for (i = 0; i < (batch-2); i++) {
-		start = (((hcell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
-			 (hcell % ACCESS_STRIDE));
-		bn_unroll(heap_invert_inner_load_z);
-
-		start = (((lcell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
-			 (lcell % ACCESS_STRIDE));
-		bn_unroll(heap_invert_inner_load_a);
-
-		lcell += off;
-		start = (((lcell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
-			 (lcell % ACCESS_STRIDE));
-		bn_unroll(heap_invert_inner_load_b);
-
-		bn_mul_mont(&c, &a, &z);
-
-		bn_unroll(heap_invert_inner_store_c);
-
-		bn_mul_mont(&c, &b, &z);
-
-		lcell -= off;
-		start = (((lcell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
-			 (lcell % ACCESS_STRIDE));
-		bn_unroll(heap_invert_inner_store_c);
-
-		lcell -= (off << 1);
-		hcell -= off;
-	}
+int get_bit(__global uchar *bitmap, ulong i)
+{
+	return (bitmap[i/8] >> ((int)i&7))&1;
 }
 
 void
@@ -1339,6 +1281,334 @@ hash_ec_point(uint *hash_out, __global bn_word *xy, __global bn_word *zip, int c
 	ripemd160_block(hash_out, hash2);
 }
 
+int compute_and_test_address(bignum * zi, __global bn_word * xy, __global uchar *bitmap, ulong bitmap_len, 
+	bignum * workspace, bignum * c, // workspace variables
+	local uint *localbitmap // local bitmap
+#ifdef TRACE
+, int dump
+#endif
+) {
+	uint hash1[16], hash2[16];
+	bn_word wh, wl;
+
+	/*
+	 * Multiply the coordinates by the inverted Z values.
+	 * Stash the coordinates in the hash buffer.
+	 * SHA-2 requires big endian, and our intended hash input
+	 * is big-endian, so swapping is unnecessary, but
+	 * inserting the format byte in front causes a headache.
+	 */
+	bn_mul_mont(workspace, zi, zi);  /* 1 / Z^2 */
+
+#define hash_ec_point_inner_2(i)		\
+	c->d[i] = xy[i*ACCESS_STRIDE];
+
+	bn_unroll(hash_ec_point_inner_2);
+
+#ifdef TRACE
+	if (dump) {
+		printf("Point x: %x %x %x %x %x %x %x %x\n", c.d[0],c.d[1],c.d[2],c.d[3],c.d[4],c.d[5],c.d[6],c.d[7]);
+	}
+#endif
+	bn_mul_mont(c, c, workspace);  /* X / Z^2 */
+#ifdef TRACE
+	if (dump) {
+		printf("Generated x: %x %x %x %x %x %x %x %x\n", c.d[0],c.d[1],c.d[2],c.d[3],c.d[4],c.d[5],c.d[6],c.d[7]);
+	}
+#endif
+	bn_from_mont(c, c);
+
+	bn_mul_mont(workspace, workspace, zi);  /* 1 / Z^3 */
+
+#define hash_ec_point_inner_3(i)		\
+		wl = wh;				\
+		wh = c->d[(BN_NWORDS - 1) - i];		\
+		hash1[i] = (wl << 24) | (wh >> 8);
+
+	bn_unroll(hash_ec_point_inner_3);
+
+#define hash_ec_point_inner_4(i)				\
+		c->d[i] = xy[(ACCESS_STRIDE/2) + i*ACCESS_STRIDE];
+
+	bn_unroll(hash_ec_point_inner_4);
+
+	bn_mul_mont(c, c, workspace);  /* Y / Z^3 */
+
+#ifdef TRACE
+	if (dump) {
+		printf("Generated y: %x %x %x %x %x %x %x %x\n", c.d[0],c.d[1],c.d[2],c.d[3],c.d[4],c.d[5],c.d[6],c.d[7]);
+	}
+#endif
+	bn_from_mont(c, c);
+	
+	int found = 0;
+	
+	bn_word save_wh = wh;
+	for (int compressed_address=0; compressed_address<2; compressed_address++) {
+		wh = save_wh;
+		hash1[0] = (hash1[0]&0xffffff)|(compressed_address ? 0x02000000 : 0x04000000);
+		
+		if (!compressed_address) {
+			#define hash_ec_point_inner_5(i)			\
+				wl = wh;					\
+				wh = c->d[(BN_NWORDS - 1) - i];			\
+				hash1[BN_NWORDS + i] = (wl << 24) | (wh >> 8);
+
+			bn_unroll(hash_ec_point_inner_5);
+		} else {
+			if (bn_is_odd(*c)) {
+				hash1[0] |= 0x01000000; /* 0x03 for odd y */
+			}
+
+			/*
+			 * Put in the last byte + SHA-2 padding.
+			 */
+			hash1[8] = wh << 24 | 0x800000;
+			hash1[9] = 0;
+			hash1[10] = 0;
+			hash1[11] = 0;
+			hash1[12] = 0;
+			hash1[13] = 0;
+			hash1[14] = 0;
+			hash1[15] = 33 * 8;
+		}
+#ifdef TRACE
+		if (dump) {
+			printf("GPU pre-hash: ");
+			for (int i=0; i<16; i++) printf("%08x ", hash1[i]);
+			printf("\n");
+		}
+#endif
+		/*
+		 * Hash the first 64 bytes of the buffer
+		 */
+		sha2_256_init(hash2);
+		sha2_256_block(hash2, hash1);
+
+		if (!compressed_address) {
+			/*
+			 * Hash the last byte of the buffer + SHA-2 padding
+			 */
+			hash1[0] = wh << 24 | 0x800000;
+			hash1[1] = 0;
+			hash1[2] = 0;
+			hash1[3] = 0;
+			hash1[4] = 0;
+			hash1[5] = 0;
+			hash1[6] = 0;
+			hash1[7] = 0;
+			hash1[8] = 0;
+			hash1[9] = 0;
+			hash1[10] = 0;
+			hash1[11] = 0;
+			hash1[12] = 0;
+			hash1[13] = 0;
+			hash1[14] = 0;
+			hash1[15] = 65 * 8;
+			sha2_256_block(hash2, hash1);
+		}
+
+		/*
+		 * Hash the SHA-2 result with RIPEMD160
+		 * Unfortunately, SHA-2 outputs big-endian, but
+		 * RIPEMD160 expects little-endian.  Need to swap!
+		 */
+
+#define hash_ec_point_inner_6(i)		\
+		hash2[i] = bswap32(hash2[i]);
+
+		hash256_unroll(hash_ec_point_inner_6);
+
+		hash2[8] = bswap32(0x80000000);
+		hash2[9] = 0;
+		hash2[10] = 0;
+		hash2[11] = 0;
+		hash2[12] = 0;
+		hash2[13] = 0;
+		hash2[14] = 32 * 8;
+		hash2[15] = 0;
+		
+		uint *hash_out = hash1+8;
+		ripemd160_init(hash_out);
+		ripemd160_block(hash_out, hash2);
+		
+		// test the address
+#ifdef TRACE
+		if (dump) printf("GPU ripemd160: %08x %08x %08x %08x %08x\n", hash_out[0], hash_out[1], hash_out[2], hash_out[3], hash_out[4]);
+#endif
+		int local_offs = get_hash_offset(hash_out)%(LOCAL_MEM_SIZE*8);
+		if (localbitmap[local_offs/(sizeof(uint)*8)]&(1<<(local_offs%(sizeof(uint)*8))))
+			if (get_bit(bitmap, get_hash_offset(hash_out)%bitmap_len))
+				found = 1;
+	}
+	return found;
+}
+
+__kernel void
+heap_invert_and_check(
+	__global bn_word *z_heap,
+	         int      batch, 
+	__global bn_word *points_in,
+	__global uchar   *bitmap, 
+	         ulong    bitmap_len /* in bits */, 
+	__global volatile int *found,
+	__global uint     *hashes, 
+	         int      nhashes)
+{
+	bignum a, b, c, z;
+	int i, off, lcell, hcell, start;
+	local volatile uint localhash[LOCAL_MEM_SIZE/sizeof(uint)];
+	
+	// fill the localhash
+	for (i=get_local_id(0);i<sizeof(localhash)/sizeof(uint); i+=get_local_size(0)) 
+		localhash[i] = 0;
+	barrier(CLK_LOCAL_MEM_FENCE);
+	for (i=get_local_id(0);i<nhashes;i+=get_local_size(0)) {
+		int offs = get_hash_offset_global(hashes+i*5)%(LOCAL_MEM_SIZE*8);
+		atomic_or(localhash + offs/(sizeof(uint)*8), 1<<(offs%(sizeof(uint)*8)));
+	}
+	barrier(CLK_LOCAL_MEM_FENCE);
+
+#define heap_invert_inner_load_a(j)				\
+		a.d[j] = z_heap[start + j*ACCESS_STRIDE];
+#define heap_invert_inner_load_b(j)				\
+		b.d[j] = z_heap[start + j*ACCESS_STRIDE];
+#define heap_invert_inner_load_z(j)				\
+		z.d[j] = z_heap[start + j*ACCESS_STRIDE];
+#define heap_invert_inner_store_z(j)				\
+		z_heap[start + j*ACCESS_STRIDE] = z.d[j];
+#define heap_invert_inner_store_c(j)				\
+		z_heap[start + j*ACCESS_STRIDE] = c.d[j];
+
+	off = get_global_size(0);
+	lcell = get_global_id(0);
+	hcell = (off * batch) + lcell;
+	for (i = 0; i < (batch-1); i++) {
+
+		start = (((lcell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
+			 (lcell % ACCESS_STRIDE));
+
+		bn_unroll(heap_invert_inner_load_a);
+
+		lcell += off;
+		start = (((lcell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
+			 (lcell % ACCESS_STRIDE));
+
+		bn_unroll(heap_invert_inner_load_b);
+
+		bn_mul_mont(&z, &a, &b);
+
+		start = (((hcell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
+			 (hcell % ACCESS_STRIDE));
+
+		bn_unroll(heap_invert_inner_store_z);
+
+		lcell += off;
+		hcell += off;
+	}
+
+	/* Invert the root, fix up 1/ZR -> R/Z */
+	bn_mod_inverse(&z, &z);
+
+#define heap_invert_inner_1(i)			\
+	a.d[i] = mont_rr[i];
+
+	bn_unroll(heap_invert_inner_1);
+
+	bn_mul_mont(&z, &z, &a);
+	bn_mul_mont(&z, &z, &a);
+
+	/* Unroll the first iteration to avoid a load/store on the root */
+	lcell -= (off << 1);
+	hcell -= (off << 1);
+
+	start = (((lcell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
+		 (lcell % ACCESS_STRIDE));
+	bn_unroll(heap_invert_inner_load_a);
+
+	lcell += off;
+	start = (((lcell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
+		 (lcell % ACCESS_STRIDE));
+	bn_unroll(heap_invert_inner_load_b);
+
+	bn_mul_mont(&c, &a, &z);
+
+	bn_unroll(heap_invert_inner_store_c);
+
+	bn_mul_mont(&c, &b, &z);
+
+	lcell -= off;
+	start = (((lcell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
+		 (lcell % ACCESS_STRIDE));
+	bn_unroll(heap_invert_inner_store_c);
+
+	lcell -= (off << 1);
+
+	for (i = 0; i < (batch-2-batch/2); i++) {
+		start = (((hcell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
+			 (hcell % ACCESS_STRIDE));
+		bn_unroll(heap_invert_inner_load_z);
+
+		start = (((lcell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
+			 (lcell % ACCESS_STRIDE));
+		bn_unroll(heap_invert_inner_load_a);
+
+		lcell += off;
+		start = (((lcell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
+			 (lcell % ACCESS_STRIDE));
+		bn_unroll(heap_invert_inner_load_b);
+
+		bn_mul_mont(&c, &a, &z);
+		
+		bn_unroll(heap_invert_inner_store_c);
+
+		bn_mul_mont(&c, &b, &z);
+
+		lcell -= off;
+		start = (((lcell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
+			 (lcell % ACCESS_STRIDE));
+		bn_unroll(heap_invert_inner_store_c);
+		
+		lcell -= (off << 1);
+		hcell -= off;
+	}
+	
+	for (; i < (batch-2); i++) {
+		
+		start = (((hcell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
+			 (hcell % ACCESS_STRIDE));
+		bn_unroll(heap_invert_inner_load_z);
+
+		start = (((lcell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
+			 (lcell % ACCESS_STRIDE));
+		bn_unroll(heap_invert_inner_load_a);
+
+		lcell += off;
+		start = (((lcell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
+			 (lcell % ACCESS_STRIDE));
+
+		bn_mul_mont(&c, &a, &z);
+		
+		__global bn_word * point = points_in + ((((2 * lcell) / ACCESS_STRIDE) * ACCESS_BUNDLE) + (lcell % (ACCESS_STRIDE/2)));
+		if (compute_and_test_address(&c, point, bitmap, bitmap_len, &a, &b, localhash)) {
+			found[-atomic_dec(found)] = lcell;
+		}
+
+		bn_unroll(heap_invert_inner_load_b);
+		bn_mul_mont(&c, &b, &z);
+
+		lcell -= off;
+		start = (((lcell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
+			 (lcell % ACCESS_STRIDE));
+		point = points_in + ((((2 * lcell) / ACCESS_STRIDE) * ACCESS_BUNDLE) + (lcell % (ACCESS_STRIDE/2)));
+		if (compute_and_test_address(&c, point, bitmap, bitmap_len, &b, &a, localhash)) {
+			found[-atomic_dec(found)] = lcell;
+		}
+
+		lcell -= (off << 1);
+		hcell -= off;
+	}
+}
 
 __kernel void
 hash_ec_point_get(__global uint *hashes_out,
@@ -1369,87 +1639,5 @@ hash_ec_point_get(__global uint *hashes_out,
                 hashes_out[i] = load_le32(hash[i]);
 
                 hash160_unroll(hash_ec_point_get_inner_1);
-        }
-}
-
-/*
- * Normally this would be one function that compared two hash160s.
- * This one compares a hash160 with an upper and lower bound in one
- * function to work around a problem with AMD's OpenCL compiler.
- */
-int
-hash160_ucmp_g(uint *a, __global uint *bound)
-{
-	uint gv;
-
-#define hash160_ucmp_g_inner_1(i) 		\
-		gv = load_be32(bound[i]);	\
-		if (a[i] < gv) return -1;	\
-		if (a[i] > gv) break;
-
-	hash160_iter(hash160_ucmp_g_inner_1);
-
-#define hash160_ucmp_g_inner_2(i)   		\
-		gv = load_be32(bound[5+i]);	\
-		if (a[i] < gv) return 0;	\
-		if (a[i] > gv) return 1;
-
-	hash160_iter(hash160_ucmp_g_inner_2);
-	return 0;
-}
-
-__kernel void
-hash_ec_point_search_prefix(__global uint *found,
-			    __global bn_word *points_in,
-			    __global bn_word *z_heap,
-			    __global uint *target_table, int ntargets)
-{
-	uint hash[5];
-	int i, high, low, p, cell, start;
-
-	cell = ((get_global_id(1) * get_global_size(0)) + get_global_id(0));
-	start = (((cell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
-		 (cell % ACCESS_STRIDE));
-	z_heap += start;
-
-	start = ((((2 * cell) / ACCESS_STRIDE) * ACCESS_BUNDLE) +
-		 (cell % (ACCESS_STRIDE/2)));
-	points_in += start;
-
-	/* Complete the coordinates and hash */
-        for (int compressed=0; compressed<2; compressed++) {
-                hash_ec_point(hash, points_in, z_heap, compressed);
-                
-                /*
-                 * Unconditionally byteswap the hash result, because:
-                 * - The byte-level convention of RIPEMD160 is little-endian
-                 * - We are comparing it in big-endian order
-                 */
-                
-#define hash_ec_point_search_prefix_inner_1(i)	\
-                hash[i] = bswap32(hash[i]);
-
-                hash160_unroll(hash_ec_point_search_prefix_inner_1);
-
-                // Binary-search the target table for the hash we just computed
-                for (high = ntargets - 1, low = 0, i = high >> 1;
-                     high >= low;
-                     i = low + ((high - low) >> 1)) {
-                        p = hash160_ucmp_g(hash, &target_table[10*i]);
-                        low = (p > 0) ? (i + 1) : low;
-                        high = (p < 0) ? (i - 1) : high;
-                        if (p == 0) {
-                                // For debugging purposes, write the hash value
-                                found[0] = ((get_global_id(1) * get_global_size(0)) +
-                                            get_global_id(0));
-                                found[1] = i;
-
-#define hash_ec_point_search_prefix_inner_2(i)	\
-                                found[i+2] = load_be32(hash[i]);
-
-                                hash160_unroll(hash_ec_point_search_prefix_inner_2);
-                                high = -1;
-                        }
-                }
         }
 }

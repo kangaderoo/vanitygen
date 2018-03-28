@@ -33,29 +33,18 @@
 const char *version = VANITYGEN_VERSION;
 const int debug = 0;
 
+char * save_file_name = NULL;
 
 void
 usage(const char *name)
 {
 	fprintf(stderr,
 "oclVanitygen %s (" OPENSSL_VERSION_TEXT ")\n"
-"Usage: %s [-vqrik1NTS] [-d <device>] [-f <filename>|-] [<pattern>...]\n"
-"Generates a bitcoin receiving address matching <pattern>, and outputs the\n"
-"address and associated private key.  The private key may be stored in a safe\n"
-"location or imported into a bitcoin client to spend any balance received on\n"
-"the address.\n"
-"By default, <pattern> is interpreted as an exact prefix.\n"
-"By default, if no device is specified, and the system has exactly one OpenCL\n"
-"device, it will be selected automatically, otherwise if the system has\n"
-"multiple OpenCL devices and no device is specified, an error will be\n"
-"reported.  To use multiple devices simultaneously, specify the -D option for\n"
-"each device.\n"
+"Usage: %s [options] starting-private_key\n"
 "\n"
 "Options:\n"
 "-v            Verbose output\n"
 "-q            Quiet output\n"
-"-i            Case-insensitive prefix search\n"
-"-k            Keep pattern and continue search after finding a match\n"
 "-1            Stop after first match\n"
 "-e            Encrypt private keys, prompt for password\n"
 "-E <password> Encrypt private keys with <password> (UNSAFE)\n"
@@ -70,10 +59,10 @@ usage(const char *name)
 "-g <x>x<y>    Set grid size\n"
 "-b <invsize>  Set modular inverse ops per thread\n"
 "-V            Enable kernel/OpenCL/hardware verification (SLOW)\n"
-"-f <file>     File containing list of patterns, one per line\n"
+"-f <file|->   File containing list of addresses, one per line\n"
 "              (Use \"-\" as the file name for stdin)\n"
 "-o <file>     Write pattern matches to <file>\n"
-"-s <file>     Seed random number generator from <file>\n",
+"-k <file>     Periodically save current private key to the file",
 version, name);
 }
 
@@ -91,7 +80,6 @@ main(int argc, char **argv)
 	char pwbuf[128];
 	int platformidx = -1, deviceidx = -1;
 	int prompt_password = 0;
-	char *seedfile = NULL;
 	char **patterns, *pend;
 	int verbose = 1;
 	int npatterns = 0;
@@ -116,23 +104,27 @@ main(int argc, char **argv)
 	int pattfpi[MAX_FILE];
 	int npattfp = 0;
 	int pattstdin = 0;
+	
+	char * start_key;
 
 	int i;
 
 	while ((opt = getopt(argc, argv,
-			     "vqik1eE:p:P:d:w:t:g:b:VSh?f:o:s:D:")) != -1) {
+			     "vq1eE:p:P:d:w:t:g:b:VSh?f:o:s:D:k:")) != -1) {
 		switch (opt) {
+		case 'o':
+			if (result_file) {
+				fprintf(stderr,
+					"Multiple output files specified\n");
+				return 1;
+			}
+			result_file = optarg;
+			break;
 		case 'v':
 			verbose = 2;
 			break;
 		case 'q':
 			verbose = 0;
-			break;
-		case 'i':
-			caseinsensitive = 1;
-			break;
-		case 'k':
-			remove_on_match = 0;
 			break;
 		case '1':
 			only_one = 1;
@@ -251,21 +243,8 @@ main(int argc, char **argv)
 			pattfpi[npattfp] = caseinsensitive;
 			npattfp++;
 			break;
-		case 'o':
-			if (result_file) {
-				fprintf(stderr,
-					"Multiple output files specified\n");
-				return 1;
-			}
-			result_file = optarg;
-			break;
-		case 's':
-			if (seedfile != NULL) {
-				fprintf(stderr,
-					"Multiple RNG seeds specified\n");
-				return 1;
-			}
-			seedfile = optarg;
+		case 'k':
+			save_file_name = optarg;
 			break;
 		default:
 			usage(argv[0]);
@@ -282,38 +261,8 @@ main(int argc, char **argv)
 	}
 #endif
 
-	if (caseinsensitive && regex)
-		fprintf(stderr,
-			"WARNING: case insensitive mode incompatible with "
-			"regular expressions\n");
-
-	if (seedfile) {
-		opt = -1;
-#if !defined(_WIN32)
-		{	struct stat st;
-			if (!stat(seedfile, &st) &&
-			    (st.st_mode & (S_IFBLK|S_IFCHR))) {
-				opt = 32;
-		} }
-#endif
-		opt = RAND_load_file(seedfile, opt);
-		if (!opt) {
-			fprintf(stderr, "Could not load RNG seed %s\n", optarg);
-			return 1;
-		}
-		if (verbose > 0) {
-			fprintf(stderr,
-				"Read %d bytes from RNG seed file\n", opt);
-		}
-	}
-
-	if (regex) {
-		vcp = vg_regex_context_new(addrtype, privtype);
-
-	} else {
-		vcp = vg_prefix_context_new(addrtype, privtype,
+	vcp = vg_prefix_context_new(addrtype, privtype,
 					    caseinsensitive);
-	}
 
 	vcp->vc_verbose = verbose;
 	vcp->vc_result_file = result_file;
@@ -325,19 +274,13 @@ main(int argc, char **argv)
 	vcp->vc_output_match = vg_output_match_console;
 	vcp->vc_output_timing = vg_output_timing_console;
 
-	if (!npattfp) {
-		if (optind >= argc) {
-			usage(argv[0]);
-			return 1;
-		}
-		patterns = &argv[optind];
-		npatterns = argc - optind;
-
-		if (!vg_context_add_patterns(vcp,
-					     (const char ** const) patterns,
-					     npatterns))
+	if (optind >= argc) {
+		usage(argv[0]);
 		return 1;
 	}
+	start_key = argv[optind];
+	printf("Start with %s\n", start_key);
+	
 
 	for (i = 0; i < npattfp; i++) {
 		fp = pattfp[i];
@@ -383,7 +326,7 @@ main(int argc, char **argv)
 		for (opt = 0; opt < ndevstrs; opt++) {
 			vocp = vg_ocl_context_new_from_devstr(vcp, devstrs[opt],
 							      safe_mode,
-							      verify_mode);
+							      verify_mode, start_key);
 			if (!vocp) {
 				fprintf(stderr,
 				"Could not open device '%s', ignoring\n",
@@ -396,7 +339,7 @@ main(int argc, char **argv)
 		vocp = vg_ocl_context_new(vcp, platformidx, deviceidx,
 					  safe_mode, verify_mode,
 					  worksize, nthreads,
-					  nrows, ncols, invsize);
+					  nrows, ncols, invsize, start_key);
 		if (vocp)
 			opened++;
 	}
