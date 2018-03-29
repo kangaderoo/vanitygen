@@ -293,11 +293,13 @@ vg_encode_address_compressed(const EC_POINT *ppoint, const EC_GROUP *pgroup,
 			   eckey_buf,
 			   sizeof(eckey_buf),
 			   NULL);
+#ifdef TRACE
 	printf("Point compressed:\n");
 	for (int i=0; i<0x21; i++) {
 		printf("%02x ", eckey_buf[i]);
 	}
 	printf("\n");
+#endif
 	pend = eckey_buf + 0x21;
 	binres[0] = addrtype;
 	SHA256(eckey_buf, pend - eckey_buf, hash1);

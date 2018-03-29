@@ -82,8 +82,6 @@
  */
 
 
-// #define TRACE
- 
 /* Byte-swapping and endianness */
 #define bswap32(v)					\
 	(((v) >> 24) | (((v) >> 8) & 0xff00) |		\
@@ -180,7 +178,7 @@ typedef struct {
 } bignum;
 
 __constant bn_word modulus[] = { MODULUS_BYTES };
-__constant bignum bn_zero;
+__constant bignum bn_zero = { 0,0,0,0,0,0,0,0};
 
 __constant bn_word mont_rr[BN_NWORDS] = { 0xe90a1, 0x7a2, 0x1, 0, };
 __constant bn_word mont_n0[2] = { 0xd2253531, 0xd838091d };
@@ -735,7 +733,6 @@ bn_mod_inverse(bignum *r, bignum *n)
 #define hash256_iter(a) iter_8(a)
 #define hash160_iter(a) iter_5(a)
 
-
 /*
  * SHA-2 256
  *
@@ -782,14 +779,14 @@ sha2_256_init(uint *out)
 #define sha2_stvar(vals, i, v) vals[(64+v-i) % 8]
 #define sha2_s0(a) (rotate(a, 30U) ^ rotate(a, 19U) ^ rotate(a, 10U))
 #define sha2_s1(a) (rotate(a, 26U) ^ rotate(a, 21U) ^ rotate(a, 7U))
-#if defined(AMD_BFI_INT)
-#pragma OPENCL EXTENSION cl_amd_media_ops : enable
-#define sha2_ch(a, b, c) amd_bytealign(a, b, c)
-#define sha2_ma(a, b, c) amd_bytealign((a^c), b, a)
-#else
-#define sha2_ch(a, b, c) (c ^ (a & (b ^ c)))
+//#if defined(AMD_BFI_INT)
+//#pragma OPENCL EXTENSION cl_amd_media_ops : enable
+//#define sha2_ch(a, b, c) amd_bytealign(a, b, c)
+//#define sha2_ma(a, b, c) amd_bytealign((a^c), b, a)
+//#else
+#define sha2_ch(a, b, c) bitselect(c, b, a)//(c ^ (a & (b ^ c)))
 #define sha2_ma(a, b, c) ((a & c) | (b & (a | c)))
-#endif
+//#endif
 
 void
 sha2_256_block(uint *out, uint *in)
@@ -879,19 +876,12 @@ __constant uchar ripemd160_rlp[] = {
 	8, 5, 12, 9, 12, 5, 14, 6, 8, 13, 6, 5, 15, 13, 11, 11
 };
 
-#if defined(AMD_BFI_INT)
 #define ripemd160_f0(x, y, z) (x ^ y ^ z)
-#define ripemd160_f1(x, y, z) amd_bytealign(x, y, z)
+#define ripemd160_f1(x, y, z) bitselect(z, y, x)
 #define ripemd160_f2(x, y, z) (z ^ (x | ~y))
-#define ripemd160_f3(x, y, z) amd_bytealign(z, x, y)
+#define ripemd160_f3(x, y, z) bitselect(y, x, z)
 #define ripemd160_f4(x, y, z) (x ^ (y | ~z))
-#else
-#define ripemd160_f0(x, y, z) (x ^ y ^ z)
-#define ripemd160_f1(x, y, z) ((x & y) | (~x & z))
-#define ripemd160_f2(x, y, z) (z ^ (x | ~y))
-#define ripemd160_f3(x, y, z) ((x & z) | (y & ~z))
-#define ripemd160_f4(x, y, z) (x ^ (y | ~z))
-#endif
+
 #define ripemd160_val(v, i, n) (v)[(80+(n)-(i)) % 5]
 #define ripemd160_valp(v, i, n) (v)[5 + ((80+(n)-(i)) % 5)]
 #define ripemd160_round(i, in, vals, f, fp, t) do {			\
@@ -1642,7 +1632,9 @@ int compute_and_test_address(bignum * zi, __global bn_word * xy, __global uchar 
 , int dump
 #endif
 ) {
-	uint hash1[16], hash2[16];
+	uint hash2[16];
+	uint hash1[16];
+	//uint hash1[16];
 	bn_word wh, wl;
 	bignum x;
 	
@@ -1711,12 +1703,10 @@ int compute_and_test_address(bignum * zi, __global bn_word * xy, __global uchar 
 			bn_unroll(hash_ec_point_inner_5);
 		} else {
 			if (bn_is_odd(*c)) {
-				hash1[0] |= 0x01000000; /* 0x03 for odd y */
+				hash1[0] |= 0x01000000; // 0x03 for odd y
 			}
 
-			/*
-			 * Put in the last byte + SHA-2 padding.
-			 */
+			// Put in the last byte + SHA-2 padding.
 			hash1[8] = wh << 24 | 0x800000;
 			hash1[9] = 0;
 			hash1[10] = 0;
@@ -1728,22 +1718,20 @@ int compute_and_test_address(bignum * zi, __global bn_word * xy, __global uchar 
 		}
 #ifdef TRACE
 		if (dump) {
-			printf("GPU pre-hash: ");
-			for (int i=0; i<16; i++) printf("%08x ", hash1[i]);
+			printf("GPU pre-hash compressed=%d: ", compressed_address);
+			printf("%08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n", 
+			hash1[0], hash1[1], hash1[2], hash1[3], hash1[4], hash1[5], hash1[6], hash1[7],
+			hash1[8], hash1[9], hash1[10], hash1[11], hash1[12], hash1[13], hash1[14], hash1[15]);
 			printf("\n");
 		}
 #endif
 		
-		/*
-		 * Hash the first 64 bytes of the buffer
-		 */
+		// Hash the first 64 bytes of the buffer
 		sha2_256_init(hash2);
 		sha2_256_block(hash2, hash1);
 		
 		if (!compressed_address) {
-			/*
-			 * Hash the last byte of the buffer + SHA-2 padding
-			 */
+			// Hash the last byte of the buffer + SHA-2 padding
 			hash1[0] = wh << 24 | 0x800000;
 			hash1[1] = 0;
 			hash1[2] = 0;
@@ -1763,6 +1751,14 @@ int compute_and_test_address(bignum * zi, __global bn_word * xy, __global uchar 
 			sha2_256_block(hash2, hash1);
 		}
 
+#ifdef TRACE
+		if (dump) {
+			printf("GPU SHA256: ");
+			printf("%08x %08x %08x %08x %08x %08x %08x %08x\n", 
+				hash2[0], hash2[1], hash2[2], hash2[3], hash2[4], hash2[5], hash2[6], hash2[7]);
+			printf("\n");
+		}
+#endif
 		/*
 		 * Hash the SHA-2 result with RIPEMD160
 		 * Unfortunately, SHA-2 outputs big-endian, but

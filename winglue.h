@@ -25,7 +25,7 @@
 #include <pthread.h>
 
 #define INLINE
-#define snprintf _snprintf
+//#define snprintf _snprintf
 
 struct timezone;
 

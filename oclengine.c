@@ -88,7 +88,7 @@ struct _vg_ocl_context_s {
 	int				voc_ocl_invsize;
 	int				voc_halt;
 	int				voc_dump_done;
-	long				voc_ocl_bitmap_size;
+	size_t				voc_ocl_bitmap_size;
 };
 
 extern char * save_file_name;
@@ -307,13 +307,13 @@ vg_ocl_dump_info(vg_ocl_context_t *vocp)
 	       vg_ocl_device_getstr(did, CL_DEVICE_PROFILE));
 	fprintf(stderr, "Version: %s\n",
 	       vg_ocl_device_getstr(did, CL_DEVICE_VERSION));
-	fprintf(stderr, "Max compute units: %"PRSIZET"d\n",
-	       vg_ocl_device_getsizet(did, CL_DEVICE_MAX_COMPUTE_UNITS));
-	fprintf(stderr, "Max workgroup size: %"PRSIZET"d\n",
-	       vg_ocl_device_getsizet(did, CL_DEVICE_MAX_WORK_GROUP_SIZE));
-	fprintf(stderr, "Global memory: %ld\n",
+	fprintf(stderr, "Max compute units: %ld\n",
+	       (long)vg_ocl_device_getsizet(did, CL_DEVICE_MAX_COMPUTE_UNITS));
+	fprintf(stderr, "Max workgroup size: %ld\n",
+	       (long)vg_ocl_device_getsizet(did, CL_DEVICE_MAX_WORK_GROUP_SIZE));
+	fprintf(stderr, "Global memory: %lu\n",
 	       vg_ocl_device_getulong(did, CL_DEVICE_GLOBAL_MEM_SIZE));
-	fprintf(stderr, "Max allocation: %ld\n",
+	fprintf(stderr, "Max allocation: %lu\n",
 	       vg_ocl_device_getulong(did, CL_DEVICE_MAX_MEM_ALLOC_SIZE));
 	vocp->voc_dump_done = 1;
 }
@@ -789,9 +789,9 @@ vg_ocl_load_program(vg_context_t *vcp, vg_ocl_context_t *vocp,
 		buf = (char *) malloc(szr);
 		if (!buf) {
 			fprintf(stderr,
-				"WARNING: Could not allocate %"PRSIZET"d bytes "
+				"WARNING: Could not allocate %ld bytes "
 				"for CL binary\n",
-			       szr);
+			       (long)szr);
 			goto out;
 		}
 
@@ -837,8 +837,8 @@ vg_ocl_load_program(vg_context_t *vcp, vg_ocl_context_t *vocp,
 				fprintf(stderr,
 					"WARNING: short write on CL kernel "
 					"binary file: expected "
-					"%"PRSIZET"d, got %"PRSIZET"d\n",
-					szr, sz);
+					"%ld, got %ld\n",
+					(long)szr, (long)sz);
 				unlink(bin_name);
 			}
 		}
@@ -940,9 +940,6 @@ vg_ocl_init(vg_context_t *vcp, vg_ocl_context_t *vocp, cl_device_id did,
 	if (vocp->voc_quirks & VG_OCL_AMD_BFI_INT)
 		end += snprintf(optbuf + end, sizeof(optbuf) - end,
 				"-DAMD_BFI_INT ");
-	if (vcp->vc_compressed)
-		end += snprintf(optbuf + end, sizeof(optbuf) - end,
-				"-DCOMPRESSED_ADDRESS");
 	if (vocp->voc_quirks & VG_OCL_NV_VERBOSE)
 		end += snprintf(optbuf + end, sizeof(optbuf) - end,
 				"-cl-nv-verbose -cl-nv-maxrregcount=128 ");
@@ -1032,7 +1029,7 @@ vg_ocl_kernel_arg_alloc(vg_ocl_context_t *vocp, int slot,
 			       NULL,
 			       &ret);
 	if (!clbuf) {
-		fprintf(stderr, "clCreateBuffer(%d,%d): ", slot, arg);
+		fprintf(stderr, "clCreateBuffer(%d,%d) size=%lld: ", slot, arg, size);
 		vg_ocl_error(vocp, ret, NULL);
 		return 0;
 	}
@@ -1177,7 +1174,7 @@ vg_ocl_kernel_int_arg(vg_ocl_context_t *vocp, int slot,
 
 int
 vg_ocl_kernel_long_arg(vg_ocl_context_t *vocp, int slot,
-		      int arg, long value)
+		      int arg, cl_long value)
 {
 	cl_int ret;
 	int i, j, knum, karg;
@@ -1517,8 +1514,7 @@ int vg_ocl_gethash_init(vg_ocl_context_t *vocp)
 		/* Each slot gets its own hash output buffer */
 		if (!vg_ocl_kernel_arg_alloc(vocp, i, A_FOUND,
 					     2/*compressed&uncompressed */ * 20 *
-					     vocp->voc_ocl_rows *
-					     vocp->voc_ocl_cols, 1))
+					     (size_t)vocp->voc_ocl_rows * vocp->voc_ocl_cols, 1))
 			return 0;
 	}
 
@@ -1594,7 +1590,7 @@ int vg_ocl_prefix_check(vg_ocl_context_t *vocp, int slot)
 	vg_exec_context_t *vxcp = &vocp->base;
 	vg_context_t *vcp = vocp->base.vxc_vc;
 	vg_test_func_t test_func = vcp->vc_test;
-	int *ocl_found_out;
+	uint32_t *ocl_found_out;
 	int found_count;
 	int res = 0;
 
@@ -2194,17 +2190,16 @@ get_device(cl_platform_id pid, int num)
 	cl_device_id id, *ids;
 
 	nd = get_device_list(pid, &ids);
-	if (nd < 0)
+	if (nd < 0) {
+		printf("can't get_device_list\n");
 		return NULL;
+	}
 	if (!nd) {
 		fprintf(stderr, "No OpenCL devices found\n");
 		return NULL;
 	}
 	if (num < 0) {
-		if (nd == 1)
-			num = 0;
-		else
-			num = nd;
+		num = 0;
 	}
 	if (num < nd) {
 		id = ids[num];
@@ -2342,7 +2337,10 @@ get_opencl_device(int platformidx, int deviceidx)
 		did = get_device(pid, deviceidx);
 		if (did)
 			return did;
+		else
+			printf("cant get_device(%d)\n", deviceidx);
 	}
+	printf("cant get_platform(%d)\n", platformidx);
 	return NULL;
 }
 
@@ -2362,6 +2360,7 @@ vg_ocl_context_new(vg_context_t *vcp,
 	/* Find the device */
 	did = get_opencl_device(platformidx, deviceidx);
 	if (!did) {
+		printf("Can't get_opencl_device\n");
 		return 0;
 	}
 
@@ -2371,6 +2370,7 @@ vg_ocl_context_new(vg_context_t *vcp,
 
 	/* Open the device and compile the kernel */
 	if (!vg_ocl_init(vcp, vocp, did, safe_mode)) {
+		printf("Can't vg_ocl_init\n");
 		free(vocp);
 		return NULL;
 	}
@@ -2444,6 +2444,8 @@ vg_ocl_context_new(vg_context_t *vcp,
 	memsize = vg_ocl_device_getulong(vocp->voc_ocldid, CL_DEVICE_GLOBAL_MEM_SIZE);
 	allocsize = vg_ocl_device_getulong(vocp->voc_ocldid, CL_DEVICE_MAX_MEM_ALLOC_SIZE);
 	
+	if (vcp->vc_verbose>1) printf("allocsize=%lld, memsize=%lld\n", allocsize, memsize);
+	
 	if (!ncols) {
 		bitmapsize = min(allocsize, memsize/2);
 		memsize -= bitmapsize;
@@ -2487,7 +2489,7 @@ vg_ocl_context_new(vg_context_t *vcp,
 		fprintf(stderr, "Grid size: %dx%d\n", ncols, nrows);
 		fprintf(stderr, "Modular inverse: %d threads, %d ops each\n",
 			round/invsize, invsize);
-		fprintf(stderr, "Bitmap size (bytes): %ld\n", bitmapsize);
+		fprintf(stderr, "Bitmap size (bytes): %lld\n", bitmapsize);
 	}
 
 	if ((round % invsize) || !is_pow2(invsize) || (invsize < 2)) {
@@ -2512,6 +2514,7 @@ vg_ocl_context_new(vg_context_t *vcp,
 	vocp->voc_ocl_cols = ncols;
 	vocp->voc_ocl_invsize = invsize;
 	vocp->voc_ocl_bitmap_size = bitmapsize*(long)8; // bits
+	//printf("vocp->voc_ocl_bitmap_size=%lld bitmapsize=%lld\n", vocp->voc_ocl_bitmap_size, bitmapsize);
 	
 	int addrtype = 128;
 	if (!vg_decode_privkey_any(vocp->base.vxc_key, &addrtype, start, NULL)) {
@@ -2538,14 +2541,13 @@ vg_ocl_context_new_from_devstr(vg_context_t *vcp, const char *devstr,
 	int platformidx, deviceidx;
 	int worksize = 0, nthreads = 0, nrows = 0, ncols = 0, invsize = 0;
 
-	char *dsd, *part, *part2, *save, *param;
+	char *dsd, *part, *part2, *param;
 
 	dsd = strdup(devstr);
 	if (!dsd)
 		return NULL;
 
-	save = NULL;
-	part = strtok_r(dsd, ",", &save);
+	part = strtok(dsd, ",");
 
 	part2 = strchr(part, ':');
 	if (!part2) {
@@ -2558,7 +2560,7 @@ vg_ocl_context_new_from_devstr(vg_context_t *vcp, const char *devstr,
 	platformidx = atoi(part);
 	deviceidx = atoi(part2 + 1);
 
-	while ((part = strtok_r(NULL, ",", &save)) != NULL) {
+	while ((part = strtok(NULL, ",")) != NULL) {
 		param = strchr(part, '=');
 		if (!param) {
 			fprintf(stderr, "Unrecognized parameter '%s'\n", part);

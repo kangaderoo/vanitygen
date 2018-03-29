@@ -16,3 +16,21 @@ make oclvanitygen
 ./oclvanitygen -f addresses.txt -o found.txt -k lastkey.txt 5KHon4xmV31t9dFSHzeN3KF3R1EvjnSRCuy5ZcVEL83NZXzsyeE
 
 An argument if the starting private key.
+
+Tips for Windows build: 
+
+Download and install OpenSSL 1.0.2 (full, not light) from https://slproweb.com/products/Win32OpenSSL.html
+Clone & compile https://github.com/tpruvot/pthreads
+Install PCRE, AMD APP SDK
+
+Set the following variables:
+
+ SET INCLUDE=C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\INCLUDE;C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\ATLMFC\INCLUDE;C:\Program Files (x86)\Windows Kits\10\include\10.0.16299.0\ucrt;C:\Program Files (x86)\Windows Kits\NETFXSDK\4.6.1\include\um;C:\Program Files (x86)\Windows Kits\10\include\10.0.16299.0\shared;C:\Program Files (x86)\Windows Kits\10\include\10.0.16299.0\um;C:\Program Files (x86)\Windows Kits\10\include\10.0.16299.0\winrt
+
+ SET LIB=C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\LIB\amd64;C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\ATLMFC\LIB\amd64;C:\Program Files (x86)\Windows Kits\10\lib\10.0.16299.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\NETFXSDK\4.6.1\lib\um\x64;C:\Program Files (x86)\Windows Kits\10\lib\10.0.16299.0\um\x64
+
+ SET PATH="C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\bin";%PATH%
+
+Run:
+
+ nmake -f Makefile.Win64
