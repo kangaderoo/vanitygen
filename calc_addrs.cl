@@ -1,3 +1,4 @@
+//#define TRACE
 /*
  * Vanitygen, vanity bitcoin address generator
  * Copyright (C) 2011 <samr7@cs.washington.edu>
@@ -837,7 +838,6 @@ sha2_256_block(uint *out, uint *in)
 	hash256_unroll(sha2_256_block_inner_3);
 }
 
-
 /*
  * RIPEMD160
  *
@@ -879,8 +879,6 @@ __constant uchar ripemd160_rlp[] = {
 	8, 5, 12, 9, 12, 5, 14, 6, 8, 13, 6, 5, 15, 13, 11, 11
 };
 
-#define ripemd160_val(v, i, n) (v)[(80+(n)-(i)) % 5]
-#define ripemd160_valp(v, i, n) (v)[5 + ((80+(n)-(i)) % 5)]
 #if defined(AMD_BFI_INT)
 #define ripemd160_f0(x, y, z) (x ^ y ^ z)
 #define ripemd160_f1(x, y, z) amd_bytealign(x, y, z)
@@ -894,6 +892,8 @@ __constant uchar ripemd160_rlp[] = {
 #define ripemd160_f3(x, y, z) ((x & z) | (y & ~z))
 #define ripemd160_f4(x, y, z) (x ^ (y | ~z))
 #endif
+#define ripemd160_val(v, i, n) (v)[(80+(n)-(i)) % 5]
+#define ripemd160_valp(v, i, n) (v)[5 + ((80+(n)-(i)) % 5)]
 #define ripemd160_round(i, in, vals, f, fp, t) do {			\
 		ripemd160_val(vals, i, 0) =				\
 			rotate(ripemd160_val(vals, i, 0) +		\
@@ -984,6 +984,360 @@ ripemd160_block(uint *out, uint *in)
 	out[0] = t;
 }
 
+void
+ripemd160_block1(uint *out, uint in_0, uint in_1, uint in_2, uint in_3, uint in_4, uint in_5, uint in_6, uint in_7, 
+  uint in_8, uint in_9, uint in_10, uint in_11, uint in_12, uint in_13, uint in_14, uint in_15
+)
+{
+
+ uint vals[10], t;
+
+ vals[0] = vals[5] = out[0];
+ vals[1] = vals[6] = out[1];
+ vals[2] = vals[7] = out[2];
+ vals[3] = vals[8] = out[3];
+ vals[4] = vals[9] = out[4];
+
+ vals[0] = rotate(vals[0] + ripemd160_f0(vals[1], vals[2], vals[3]) + in_0 + ripemd160_k[0], (uint)ripemd160_rl[0]) + vals[4];
+ vals[2] = rotate(vals[2], 10U);
+ vals[5] = rotate(vals[5] + ripemd160_f4(vals[6], vals[7], vals[8]) + in_5 + ripemd160_kp[0], (uint)ripemd160_rlp[0]) + vals[9];
+ vals[7] = rotate(vals[7], 10U);
+ vals[4] = rotate(vals[4] + ripemd160_f0(vals[0], vals[1], vals[2]) + in_1 + ripemd160_k[0], (uint)ripemd160_rl[1]) + vals[3];
+ vals[1] = rotate(vals[1], 10U);
+ vals[9] = rotate(vals[9] + ripemd160_f4(vals[5], vals[6], vals[7]) + in_14 + ripemd160_kp[0], (uint)ripemd160_rlp[1]) + vals[8];
+ vals[6] = rotate(vals[6], 10U);
+ vals[3] = rotate(vals[3] + ripemd160_f0(vals[4], vals[0], vals[1]) + in_2 + ripemd160_k[0], (uint)ripemd160_rl[2]) + vals[2];
+ vals[0] = rotate(vals[0], 10U);
+ vals[8] = rotate(vals[8] + ripemd160_f4(vals[9], vals[5], vals[6]) + in_7 + ripemd160_kp[0], (uint)ripemd160_rlp[2]) + vals[7];
+ vals[5] = rotate(vals[5], 10U);
+ vals[2] = rotate(vals[2] + ripemd160_f0(vals[3], vals[4], vals[0]) + in_3 + ripemd160_k[0], (uint)ripemd160_rl[3]) + vals[1];
+ vals[4] = rotate(vals[4], 10U);
+ vals[7] = rotate(vals[7] + ripemd160_f4(vals[8], vals[9], vals[5]) + in_0 + ripemd160_kp[0], (uint)ripemd160_rlp[3]) + vals[6];
+ vals[9] = rotate(vals[9], 10U);
+ vals[1] = rotate(vals[1] + ripemd160_f0(vals[2], vals[3], vals[4]) + in_4 + ripemd160_k[0], (uint)ripemd160_rl[4]) + vals[0];
+ vals[3] = rotate(vals[3], 10U);
+ vals[6] = rotate(vals[6] + ripemd160_f4(vals[7], vals[8], vals[9]) + in_9 + ripemd160_kp[0], (uint)ripemd160_rlp[4]) + vals[5];
+ vals[8] = rotate(vals[8], 10U);
+ vals[0] = rotate(vals[0] + ripemd160_f0(vals[1], vals[2], vals[3]) + in_5 + ripemd160_k[0], (uint)ripemd160_rl[5]) + vals[4];
+ vals[2] = rotate(vals[2], 10U);
+ vals[5] = rotate(vals[5] + ripemd160_f4(vals[6], vals[7], vals[8]) + in_2 + ripemd160_kp[0], (uint)ripemd160_rlp[5]) + vals[9];
+ vals[7] = rotate(vals[7], 10U);
+ vals[4] = rotate(vals[4] + ripemd160_f0(vals[0], vals[1], vals[2]) + in_6 + ripemd160_k[0], (uint)ripemd160_rl[6]) + vals[3];
+ vals[1] = rotate(vals[1], 10U);
+ vals[9] = rotate(vals[9] + ripemd160_f4(vals[5], vals[6], vals[7]) + in_11 + ripemd160_kp[0], (uint)ripemd160_rlp[6]) + vals[8];
+ vals[6] = rotate(vals[6], 10U);
+ vals[3] = rotate(vals[3] + ripemd160_f0(vals[4], vals[0], vals[1]) + in_7 + ripemd160_k[0], (uint)ripemd160_rl[7]) + vals[2];
+ vals[0] = rotate(vals[0], 10U);
+ vals[8] = rotate(vals[8] + ripemd160_f4(vals[9], vals[5], vals[6]) + in_4 + ripemd160_kp[0], (uint)ripemd160_rlp[7]) + vals[7];
+ vals[5] = rotate(vals[5], 10U);
+ vals[2] = rotate(vals[2] + ripemd160_f0(vals[3], vals[4], vals[0]) + in_8 + ripemd160_k[0], (uint)ripemd160_rl[8]) + vals[1];
+ vals[4] = rotate(vals[4], 10U);
+ vals[7] = rotate(vals[7] + ripemd160_f4(vals[8], vals[9], vals[5]) + in_13 + ripemd160_kp[0], (uint)ripemd160_rlp[8]) + vals[6];
+ vals[9] = rotate(vals[9], 10U);
+ vals[1] = rotate(vals[1] + ripemd160_f0(vals[2], vals[3], vals[4]) + in_9 + ripemd160_k[0], (uint)ripemd160_rl[9]) + vals[0];
+ vals[3] = rotate(vals[3], 10U);
+ vals[6] = rotate(vals[6] + ripemd160_f4(vals[7], vals[8], vals[9]) + in_6 + ripemd160_kp[0], (uint)ripemd160_rlp[9]) + vals[5];
+ vals[8] = rotate(vals[8], 10U);
+ vals[0] = rotate(vals[0] + ripemd160_f0(vals[1], vals[2], vals[3]) + in_10 + ripemd160_k[0], (uint)ripemd160_rl[10]) + vals[4];
+ vals[2] = rotate(vals[2], 10U);
+ vals[5] = rotate(vals[5] + ripemd160_f4(vals[6], vals[7], vals[8]) + in_15 + ripemd160_kp[0], (uint)ripemd160_rlp[10]) + vals[9];
+ vals[7] = rotate(vals[7], 10U);
+ vals[4] = rotate(vals[4] + ripemd160_f0(vals[0], vals[1], vals[2]) + in_11 + ripemd160_k[0], (uint)ripemd160_rl[11]) + vals[3];
+ vals[1] = rotate(vals[1], 10U);
+ vals[9] = rotate(vals[9] + ripemd160_f4(vals[5], vals[6], vals[7]) + in_8 + ripemd160_kp[0], (uint)ripemd160_rlp[11]) + vals[8];
+ vals[6] = rotate(vals[6], 10U);
+ vals[3] = rotate(vals[3] + ripemd160_f0(vals[4], vals[0], vals[1]) + in_12 + ripemd160_k[0], (uint)ripemd160_rl[12]) + vals[2];
+ vals[0] = rotate(vals[0], 10U);
+ vals[8] = rotate(vals[8] + ripemd160_f4(vals[9], vals[5], vals[6]) + in_1 + ripemd160_kp[0], (uint)ripemd160_rlp[12]) + vals[7];
+ vals[5] = rotate(vals[5], 10U);
+ vals[2] = rotate(vals[2] + ripemd160_f0(vals[3], vals[4], vals[0]) + in_13 + ripemd160_k[0], (uint)ripemd160_rl[13]) + vals[1];
+ vals[4] = rotate(vals[4], 10U);
+ vals[7] = rotate(vals[7] + ripemd160_f4(vals[8], vals[9], vals[5]) + in_10 + ripemd160_kp[0], (uint)ripemd160_rlp[13]) + vals[6];
+ vals[9] = rotate(vals[9], 10U);
+ vals[1] = rotate(vals[1] + ripemd160_f0(vals[2], vals[3], vals[4]) + in_14 + ripemd160_k[0], (uint)ripemd160_rl[14]) + vals[0];
+ vals[3] = rotate(vals[3], 10U);
+ vals[6] = rotate(vals[6] + ripemd160_f4(vals[7], vals[8], vals[9]) + in_3 + ripemd160_kp[0], (uint)ripemd160_rlp[14]) + vals[5];
+ vals[8] = rotate(vals[8], 10U);
+ vals[0] = rotate(vals[0] + ripemd160_f0(vals[1], vals[2], vals[3]) + in_15 + ripemd160_k[0], (uint)ripemd160_rl[15]) + vals[4];
+ vals[2] = rotate(vals[2], 10U);
+ vals[5] = rotate(vals[5] + ripemd160_f4(vals[6], vals[7], vals[8]) + in_12 + ripemd160_kp[0], (uint)ripemd160_rlp[15]) + vals[9];
+ vals[7] = rotate(vals[7], 10U);
+
+
+ vals[4] = rotate(vals[4] + ripemd160_f1(vals[0], vals[1], vals[2]) + in_7 + ripemd160_k[1], (uint)ripemd160_rl[16]) + vals[3];
+ vals[1] = rotate(vals[1], 10U);
+ vals[9] = rotate(vals[9] + ripemd160_f3(vals[5], vals[6], vals[7]) + in_6 + ripemd160_kp[1], (uint)ripemd160_rlp[16]) + vals[8];
+ vals[6] = rotate(vals[6], 10U);
+ vals[3] = rotate(vals[3] + ripemd160_f1(vals[4], vals[0], vals[1]) + in_4 + ripemd160_k[1], (uint)ripemd160_rl[17]) + vals[2];
+ vals[0] = rotate(vals[0], 10U);
+ vals[8] = rotate(vals[8] + ripemd160_f3(vals[9], vals[5], vals[6]) + in_11 + ripemd160_kp[1], (uint)ripemd160_rlp[17]) + vals[7];
+ vals[5] = rotate(vals[5], 10U);
+ vals[2] = rotate(vals[2] + ripemd160_f1(vals[3], vals[4], vals[0]) + in_13 + ripemd160_k[1], (uint)ripemd160_rl[18]) + vals[1];
+ vals[4] = rotate(vals[4], 10U);
+ vals[7] = rotate(vals[7] + ripemd160_f3(vals[8], vals[9], vals[5]) + in_3 + ripemd160_kp[1], (uint)ripemd160_rlp[18]) + vals[6];
+ vals[9] = rotate(vals[9], 10U);
+ vals[1] = rotate(vals[1] + ripemd160_f1(vals[2], vals[3], vals[4]) + in_1 + ripemd160_k[1], (uint)ripemd160_rl[19]) + vals[0];
+ vals[3] = rotate(vals[3], 10U);
+ vals[6] = rotate(vals[6] + ripemd160_f3(vals[7], vals[8], vals[9]) + in_7 + ripemd160_kp[1], (uint)ripemd160_rlp[19]) + vals[5];
+ vals[8] = rotate(vals[8], 10U);
+ vals[0] = rotate(vals[0] + ripemd160_f1(vals[1], vals[2], vals[3]) + in_10 + ripemd160_k[1], (uint)ripemd160_rl[20]) + vals[4];
+ vals[2] = rotate(vals[2], 10U);
+ vals[5] = rotate(vals[5] + ripemd160_f3(vals[6], vals[7], vals[8]) + in_0 + ripemd160_kp[1], (uint)ripemd160_rlp[20]) + vals[9];
+ vals[7] = rotate(vals[7], 10U);
+ vals[4] = rotate(vals[4] + ripemd160_f1(vals[0], vals[1], vals[2]) + in_6 + ripemd160_k[1], (uint)ripemd160_rl[21]) + vals[3];
+ vals[1] = rotate(vals[1], 10U);
+ vals[9] = rotate(vals[9] + ripemd160_f3(vals[5], vals[6], vals[7]) + in_13 + ripemd160_kp[1], (uint)ripemd160_rlp[21]) + vals[8];
+ vals[6] = rotate(vals[6], 10U);
+ vals[3] = rotate(vals[3] + ripemd160_f1(vals[4], vals[0], vals[1]) + in_15 + ripemd160_k[1], (uint)ripemd160_rl[22]) + vals[2];
+ vals[0] = rotate(vals[0], 10U);
+ vals[8] = rotate(vals[8] + ripemd160_f3(vals[9], vals[5], vals[6]) + in_5 + ripemd160_kp[1], (uint)ripemd160_rlp[22]) + vals[7];
+ vals[5] = rotate(vals[5], 10U);
+ vals[2] = rotate(vals[2] + ripemd160_f1(vals[3], vals[4], vals[0]) + in_3 + ripemd160_k[1], (uint)ripemd160_rl[23]) + vals[1];
+ vals[4] = rotate(vals[4], 10U);
+ vals[7] = rotate(vals[7] + ripemd160_f3(vals[8], vals[9], vals[5]) + in_10 + ripemd160_kp[1], (uint)ripemd160_rlp[23]) + vals[6];
+ vals[9] = rotate(vals[9], 10U);
+ vals[1] = rotate(vals[1] + ripemd160_f1(vals[2], vals[3], vals[4]) + in_12 + ripemd160_k[1], (uint)ripemd160_rl[24]) + vals[0];
+ vals[3] = rotate(vals[3], 10U);
+ vals[6] = rotate(vals[6] + ripemd160_f3(vals[7], vals[8], vals[9]) + in_14 + ripemd160_kp[1], (uint)ripemd160_rlp[24]) + vals[5];
+ vals[8] = rotate(vals[8], 10U);
+ vals[0] = rotate(vals[0] + ripemd160_f1(vals[1], vals[2], vals[3]) + in_0 + ripemd160_k[1], (uint)ripemd160_rl[25]) + vals[4];
+ vals[2] = rotate(vals[2], 10U);
+ vals[5] = rotate(vals[5] + ripemd160_f3(vals[6], vals[7], vals[8]) + in_15 + ripemd160_kp[1], (uint)ripemd160_rlp[25]) + vals[9];
+ vals[7] = rotate(vals[7], 10U);
+ vals[4] = rotate(vals[4] + ripemd160_f1(vals[0], vals[1], vals[2]) + in_9 + ripemd160_k[1], (uint)ripemd160_rl[26]) + vals[3];
+ vals[1] = rotate(vals[1], 10U);
+ vals[9] = rotate(vals[9] + ripemd160_f3(vals[5], vals[6], vals[7]) + in_8 + ripemd160_kp[1], (uint)ripemd160_rlp[26]) + vals[8];
+ vals[6] = rotate(vals[6], 10U);
+ vals[3] = rotate(vals[3] + ripemd160_f1(vals[4], vals[0], vals[1]) + in_5 + ripemd160_k[1], (uint)ripemd160_rl[27]) + vals[2];
+ vals[0] = rotate(vals[0], 10U);
+ vals[8] = rotate(vals[8] + ripemd160_f3(vals[9], vals[5], vals[6]) + in_12 + ripemd160_kp[1], (uint)ripemd160_rlp[27]) + vals[7];
+ vals[5] = rotate(vals[5], 10U);
+ vals[2] = rotate(vals[2] + ripemd160_f1(vals[3], vals[4], vals[0]) + in_2 + ripemd160_k[1], (uint)ripemd160_rl[28]) + vals[1];
+ vals[4] = rotate(vals[4], 10U);
+ vals[7] = rotate(vals[7] + ripemd160_f3(vals[8], vals[9], vals[5]) + in_4 + ripemd160_kp[1], (uint)ripemd160_rlp[28]) + vals[6];
+ vals[9] = rotate(vals[9], 10U);
+ vals[1] = rotate(vals[1] + ripemd160_f1(vals[2], vals[3], vals[4]) + in_14 + ripemd160_k[1], (uint)ripemd160_rl[29]) + vals[0];
+ vals[3] = rotate(vals[3], 10U);
+ vals[6] = rotate(vals[6] + ripemd160_f3(vals[7], vals[8], vals[9]) + in_9 + ripemd160_kp[1], (uint)ripemd160_rlp[29]) + vals[5];
+ vals[8] = rotate(vals[8], 10U);
+ vals[0] = rotate(vals[0] + ripemd160_f1(vals[1], vals[2], vals[3]) + in_11 + ripemd160_k[1], (uint)ripemd160_rl[30]) + vals[4];
+ vals[2] = rotate(vals[2], 10U);
+ vals[5] = rotate(vals[5] + ripemd160_f3(vals[6], vals[7], vals[8]) + in_1 + ripemd160_kp[1], (uint)ripemd160_rlp[30]) + vals[9];
+ vals[7] = rotate(vals[7], 10U);
+ vals[4] = rotate(vals[4] + ripemd160_f1(vals[0], vals[1], vals[2]) + in_8 + ripemd160_k[1], (uint)ripemd160_rl[31]) + vals[3];
+ vals[1] = rotate(vals[1], 10U);
+ vals[9] = rotate(vals[9] + ripemd160_f3(vals[5], vals[6], vals[7]) + in_2 + ripemd160_kp[1], (uint)ripemd160_rlp[31]) + vals[8];
+ vals[6] = rotate(vals[6], 10U);
+;
+
+
+ vals[3] = rotate(vals[3] + ripemd160_f2(vals[4], vals[0], vals[1]) + in_3 + ripemd160_k[2], (uint)ripemd160_rl[32]) + vals[2];
+ vals[0] = rotate(vals[0], 10U);
+ vals[8] = rotate(vals[8] + ripemd160_f2(vals[9], vals[5], vals[6]) + in_15 + ripemd160_kp[2], (uint)ripemd160_rlp[32]) + vals[7];
+ vals[5] = rotate(vals[5], 10U);
+ vals[2] = rotate(vals[2] + ripemd160_f2(vals[3], vals[4], vals[0]) + in_10 + ripemd160_k[2], (uint)ripemd160_rl[33]) + vals[1];
+ vals[4] = rotate(vals[4], 10U);
+ vals[7] = rotate(vals[7] + ripemd160_f2(vals[8], vals[9], vals[5]) + in_5 + ripemd160_kp[2], (uint)ripemd160_rlp[33]) + vals[6];
+ vals[9] = rotate(vals[9], 10U);
+ vals[1] = rotate(vals[1] + ripemd160_f2(vals[2], vals[3], vals[4]) + in_14 + ripemd160_k[2], (uint)ripemd160_rl[34]) + vals[0];
+ vals[3] = rotate(vals[3], 10U);
+ vals[6] = rotate(vals[6] + ripemd160_f2(vals[7], vals[8], vals[9]) + in_1 + ripemd160_kp[2], (uint)ripemd160_rlp[34]) + vals[5];
+ vals[8] = rotate(vals[8], 10U);
+ vals[0] = rotate(vals[0] + ripemd160_f2(vals[1], vals[2], vals[3]) + in_4 + ripemd160_k[2], (uint)ripemd160_rl[35]) + vals[4];
+ vals[2] = rotate(vals[2], 10U);
+ vals[5] = rotate(vals[5] + ripemd160_f2(vals[6], vals[7], vals[8]) + in_3 + ripemd160_kp[2], (uint)ripemd160_rlp[35]) + vals[9];
+ vals[7] = rotate(vals[7], 10U);
+ vals[4] = rotate(vals[4] + ripemd160_f2(vals[0], vals[1], vals[2]) + in_9 + ripemd160_k[2], (uint)ripemd160_rl[36]) + vals[3];
+ vals[1] = rotate(vals[1], 10U);
+ vals[9] = rotate(vals[9] + ripemd160_f2(vals[5], vals[6], vals[7]) + in_7 + ripemd160_kp[2], (uint)ripemd160_rlp[36]) + vals[8];
+ vals[6] = rotate(vals[6], 10U);
+ vals[3] = rotate(vals[3] + ripemd160_f2(vals[4], vals[0], vals[1]) + in_15 + ripemd160_k[2], (uint)ripemd160_rl[37]) + vals[2];
+ vals[0] = rotate(vals[0], 10U);
+ vals[8] = rotate(vals[8] + ripemd160_f2(vals[9], vals[5], vals[6]) + in_14 + ripemd160_kp[2], (uint)ripemd160_rlp[37]) + vals[7];
+ vals[5] = rotate(vals[5], 10U);
+ vals[2] = rotate(vals[2] + ripemd160_f2(vals[3], vals[4], vals[0]) + in_8 + ripemd160_k[2], (uint)ripemd160_rl[38]) + vals[1];
+ vals[4] = rotate(vals[4], 10U);
+ vals[7] = rotate(vals[7] + ripemd160_f2(vals[8], vals[9], vals[5]) + in_6 + ripemd160_kp[2], (uint)ripemd160_rlp[38]) + vals[6];
+ vals[9] = rotate(vals[9], 10U);
+ vals[1] = rotate(vals[1] + ripemd160_f2(vals[2], vals[3], vals[4]) + in_1 + ripemd160_k[2], (uint)ripemd160_rl[39]) + vals[0];
+ vals[3] = rotate(vals[3], 10U);
+ vals[6] = rotate(vals[6] + ripemd160_f2(vals[7], vals[8], vals[9]) + in_9 + ripemd160_kp[2], (uint)ripemd160_rlp[39]) + vals[5];
+ vals[8] = rotate(vals[8], 10U);
+ vals[0] = rotate(vals[0] + ripemd160_f2(vals[1], vals[2], vals[3]) + in_2 + ripemd160_k[2], (uint)ripemd160_rl[40]) + vals[4];
+ vals[2] = rotate(vals[2], 10U);
+ vals[5] = rotate(vals[5] + ripemd160_f2(vals[6], vals[7], vals[8]) + in_11 + ripemd160_kp[2], (uint)ripemd160_rlp[40]) + vals[9];
+ vals[7] = rotate(vals[7], 10U);
+ vals[4] = rotate(vals[4] + ripemd160_f2(vals[0], vals[1], vals[2]) + in_7 + ripemd160_k[2], (uint)ripemd160_rl[41]) + vals[3];
+ vals[1] = rotate(vals[1], 10U);
+ vals[9] = rotate(vals[9] + ripemd160_f2(vals[5], vals[6], vals[7]) + in_8 + ripemd160_kp[2], (uint)ripemd160_rlp[41]) + vals[8];
+ vals[6] = rotate(vals[6], 10U);
+ vals[3] = rotate(vals[3] + ripemd160_f2(vals[4], vals[0], vals[1]) + in_0 + ripemd160_k[2], (uint)ripemd160_rl[42]) + vals[2];
+ vals[0] = rotate(vals[0], 10U);
+ vals[8] = rotate(vals[8] + ripemd160_f2(vals[9], vals[5], vals[6]) + in_12 + ripemd160_kp[2], (uint)ripemd160_rlp[42]) + vals[7];
+ vals[5] = rotate(vals[5], 10U);
+ vals[2] = rotate(vals[2] + ripemd160_f2(vals[3], vals[4], vals[0]) + in_6 + ripemd160_k[2], (uint)ripemd160_rl[43]) + vals[1];
+ vals[4] = rotate(vals[4], 10U);
+ vals[7] = rotate(vals[7] + ripemd160_f2(vals[8], vals[9], vals[5]) + in_2 + ripemd160_kp[2], (uint)ripemd160_rlp[43]) + vals[6];
+ vals[9] = rotate(vals[9], 10U);
+ vals[1] = rotate(vals[1] + ripemd160_f2(vals[2], vals[3], vals[4]) + in_13 + ripemd160_k[2], (uint)ripemd160_rl[44]) + vals[0];
+ vals[3] = rotate(vals[3], 10U);
+ vals[6] = rotate(vals[6] + ripemd160_f2(vals[7], vals[8], vals[9]) + in_10 + ripemd160_kp[2], (uint)ripemd160_rlp[44]) + vals[5];
+ vals[8] = rotate(vals[8], 10U);
+ vals[0] = rotate(vals[0] + ripemd160_f2(vals[1], vals[2], vals[3]) + in_11 + ripemd160_k[2], (uint)ripemd160_rl[45]) + vals[4];
+ vals[2] = rotate(vals[2], 10U);
+ vals[5] = rotate(vals[5] + ripemd160_f2(vals[6], vals[7], vals[8]) + in_0 + ripemd160_kp[2], (uint)ripemd160_rlp[45]) + vals[9];
+ vals[7] = rotate(vals[7], 10U);
+ vals[4] = rotate(vals[4] + ripemd160_f2(vals[0], vals[1], vals[2]) + in_5 + ripemd160_k[2], (uint)ripemd160_rl[46]) + vals[3];
+ vals[1] = rotate(vals[1], 10U);
+ vals[9] = rotate(vals[9] + ripemd160_f2(vals[5], vals[6], vals[7]) + in_4 + ripemd160_kp[2], (uint)ripemd160_rlp[46]) + vals[8];
+ vals[6] = rotate(vals[6], 10U);
+ vals[3] = rotate(vals[3] + ripemd160_f2(vals[4], vals[0], vals[1]) + in_12 + ripemd160_k[2], (uint)ripemd160_rl[47]) + vals[2];
+ vals[0] = rotate(vals[0], 10U);
+ vals[8] = rotate(vals[8] + ripemd160_f2(vals[9], vals[5], vals[6]) + in_13 + ripemd160_kp[2], (uint)ripemd160_rlp[47]) + vals[7];
+ vals[5] = rotate(vals[5], 10U);
+;
+
+
+ vals[2] = rotate(vals[2] + ripemd160_f3(vals[3], vals[4], vals[0]) + in_1 + ripemd160_k[3], (uint)ripemd160_rl[48]) + vals[1];
+ vals[4] = rotate(vals[4], 10U);
+ vals[7] = rotate(vals[7] + ripemd160_f1(vals[8], vals[9], vals[5]) + in_8 + ripemd160_kp[3], (uint)ripemd160_rlp[48]) + vals[6];
+ vals[9] = rotate(vals[9], 10U);
+ vals[1] = rotate(vals[1] + ripemd160_f3(vals[2], vals[3], vals[4]) + in_9 + ripemd160_k[3], (uint)ripemd160_rl[49]) + vals[0];
+ vals[3] = rotate(vals[3], 10U);
+ vals[6] = rotate(vals[6] + ripemd160_f1(vals[7], vals[8], vals[9]) + in_6 + ripemd160_kp[3], (uint)ripemd160_rlp[49]) + vals[5];
+ vals[8] = rotate(vals[8], 10U);
+ vals[0] = rotate(vals[0] + ripemd160_f3(vals[1], vals[2], vals[3]) + in_11 + ripemd160_k[3], (uint)ripemd160_rl[50]) + vals[4];
+ vals[2] = rotate(vals[2], 10U);
+ vals[5] = rotate(vals[5] + ripemd160_f1(vals[6], vals[7], vals[8]) + in_4 + ripemd160_kp[3], (uint)ripemd160_rlp[50]) + vals[9];
+ vals[7] = rotate(vals[7], 10U);
+ vals[4] = rotate(vals[4] + ripemd160_f3(vals[0], vals[1], vals[2]) + in_10 + ripemd160_k[3], (uint)ripemd160_rl[51]) + vals[3];
+ vals[1] = rotate(vals[1], 10U);
+ vals[9] = rotate(vals[9] + ripemd160_f1(vals[5], vals[6], vals[7]) + in_1 + ripemd160_kp[3], (uint)ripemd160_rlp[51]) + vals[8];
+ vals[6] = rotate(vals[6], 10U);
+ vals[3] = rotate(vals[3] + ripemd160_f3(vals[4], vals[0], vals[1]) + in_0 + ripemd160_k[3], (uint)ripemd160_rl[52]) + vals[2];
+ vals[0] = rotate(vals[0], 10U);
+ vals[8] = rotate(vals[8] + ripemd160_f1(vals[9], vals[5], vals[6]) + in_3 + ripemd160_kp[3], (uint)ripemd160_rlp[52]) + vals[7];
+ vals[5] = rotate(vals[5], 10U);
+ vals[2] = rotate(vals[2] + ripemd160_f3(vals[3], vals[4], vals[0]) + in_8 + ripemd160_k[3], (uint)ripemd160_rl[53]) + vals[1];
+ vals[4] = rotate(vals[4], 10U);
+ vals[7] = rotate(vals[7] + ripemd160_f1(vals[8], vals[9], vals[5]) + in_11 + ripemd160_kp[3], (uint)ripemd160_rlp[53]) + vals[6];
+ vals[9] = rotate(vals[9], 10U);
+ vals[1] = rotate(vals[1] + ripemd160_f3(vals[2], vals[3], vals[4]) + in_12 + ripemd160_k[3], (uint)ripemd160_rl[54]) + vals[0];
+ vals[3] = rotate(vals[3], 10U);
+ vals[6] = rotate(vals[6] + ripemd160_f1(vals[7], vals[8], vals[9]) + in_15 + ripemd160_kp[3], (uint)ripemd160_rlp[54]) + vals[5];
+ vals[8] = rotate(vals[8], 10U);
+ vals[0] = rotate(vals[0] + ripemd160_f3(vals[1], vals[2], vals[3]) + in_4 + ripemd160_k[3], (uint)ripemd160_rl[55]) + vals[4];
+ vals[2] = rotate(vals[2], 10U);
+ vals[5] = rotate(vals[5] + ripemd160_f1(vals[6], vals[7], vals[8]) + in_0 + ripemd160_kp[3], (uint)ripemd160_rlp[55]) + vals[9];
+ vals[7] = rotate(vals[7], 10U);
+ vals[4] = rotate(vals[4] + ripemd160_f3(vals[0], vals[1], vals[2]) + in_13 + ripemd160_k[3], (uint)ripemd160_rl[56]) + vals[3];
+ vals[1] = rotate(vals[1], 10U);
+ vals[9] = rotate(vals[9] + ripemd160_f1(vals[5], vals[6], vals[7]) + in_5 + ripemd160_kp[3], (uint)ripemd160_rlp[56]) + vals[8];
+ vals[6] = rotate(vals[6], 10U);
+ vals[3] = rotate(vals[3] + ripemd160_f3(vals[4], vals[0], vals[1]) + in_3 + ripemd160_k[3], (uint)ripemd160_rl[57]) + vals[2];
+ vals[0] = rotate(vals[0], 10U);
+ vals[8] = rotate(vals[8] + ripemd160_f1(vals[9], vals[5], vals[6]) + in_12 + ripemd160_kp[3], (uint)ripemd160_rlp[57]) + vals[7];
+ vals[5] = rotate(vals[5], 10U);
+ vals[2] = rotate(vals[2] + ripemd160_f3(vals[3], vals[4], vals[0]) + in_7 + ripemd160_k[3], (uint)ripemd160_rl[58]) + vals[1];
+ vals[4] = rotate(vals[4], 10U);
+ vals[7] = rotate(vals[7] + ripemd160_f1(vals[8], vals[9], vals[5]) + in_2 + ripemd160_kp[3], (uint)ripemd160_rlp[58]) + vals[6];
+ vals[9] = rotate(vals[9], 10U);
+ vals[1] = rotate(vals[1] + ripemd160_f3(vals[2], vals[3], vals[4]) + in_15 + ripemd160_k[3], (uint)ripemd160_rl[59]) + vals[0];
+ vals[3] = rotate(vals[3], 10U);
+ vals[6] = rotate(vals[6] + ripemd160_f1(vals[7], vals[8], vals[9]) + in_13 + ripemd160_kp[3], (uint)ripemd160_rlp[59]) + vals[5];
+ vals[8] = rotate(vals[8], 10U);
+ vals[0] = rotate(vals[0] + ripemd160_f3(vals[1], vals[2], vals[3]) + in_14 + ripemd160_k[3], (uint)ripemd160_rl[60]) + vals[4];
+ vals[2] = rotate(vals[2], 10U);
+ vals[5] = rotate(vals[5] + ripemd160_f1(vals[6], vals[7], vals[8]) + in_9 + ripemd160_kp[3], (uint)ripemd160_rlp[60]) + vals[9];
+ vals[7] = rotate(vals[7], 10U);
+ vals[4] = rotate(vals[4] + ripemd160_f3(vals[0], vals[1], vals[2]) + in_5 + ripemd160_k[3], (uint)ripemd160_rl[61]) + vals[3];
+ vals[1] = rotate(vals[1], 10U);
+ vals[9] = rotate(vals[9] + ripemd160_f1(vals[5], vals[6], vals[7]) + in_7 + ripemd160_kp[3], (uint)ripemd160_rlp[61]) + vals[8];
+ vals[6] = rotate(vals[6], 10U);
+ vals[3] = rotate(vals[3] + ripemd160_f3(vals[4], vals[0], vals[1]) + in_6 + ripemd160_k[3], (uint)ripemd160_rl[62]) + vals[2];
+ vals[0] = rotate(vals[0], 10U);
+ vals[8] = rotate(vals[8] + ripemd160_f1(vals[9], vals[5], vals[6]) + in_10 + ripemd160_kp[3], (uint)ripemd160_rlp[62]) + vals[7];
+ vals[5] = rotate(vals[5], 10U);
+ vals[2] = rotate(vals[2] + ripemd160_f3(vals[3], vals[4], vals[0]) + in_2 + ripemd160_k[3], (uint)ripemd160_rl[63]) + vals[1];
+ vals[4] = rotate(vals[4], 10U);
+ vals[7] = rotate(vals[7] + ripemd160_f1(vals[8], vals[9], vals[5]) + in_14 + ripemd160_kp[3], (uint)ripemd160_rlp[63]) + vals[6];
+ vals[9] = rotate(vals[9], 10U);
+;
+
+
+ vals[1] = rotate(vals[1] + ripemd160_f4(vals[2], vals[3], vals[4]) + in_4 + ripemd160_k[4], (uint)ripemd160_rl[64]) + vals[0];
+ vals[3] = rotate(vals[3], 10U);
+ vals[6] = rotate(vals[6] + ripemd160_f0(vals[7], vals[8], vals[9]) + in_12 + ripemd160_kp[4], (uint)ripemd160_rlp[64]) + vals[5];
+ vals[8] = rotate(vals[8], 10U);
+ vals[0] = rotate(vals[0] + ripemd160_f4(vals[1], vals[2], vals[3]) + in_0 + ripemd160_k[4], (uint)ripemd160_rl[65]) + vals[4];
+ vals[2] = rotate(vals[2], 10U);
+ vals[5] = rotate(vals[5] + ripemd160_f0(vals[6], vals[7], vals[8]) + in_15 + ripemd160_kp[4], (uint)ripemd160_rlp[65]) + vals[9];
+ vals[7] = rotate(vals[7], 10U);
+ vals[4] = rotate(vals[4] + ripemd160_f4(vals[0], vals[1], vals[2]) + in_5 + ripemd160_k[4], (uint)ripemd160_rl[66]) + vals[3];
+ vals[1] = rotate(vals[1], 10U);
+ vals[9] = rotate(vals[9] + ripemd160_f0(vals[5], vals[6], vals[7]) + in_10 + ripemd160_kp[4], (uint)ripemd160_rlp[66]) + vals[8];
+ vals[6] = rotate(vals[6], 10U);
+ vals[3] = rotate(vals[3] + ripemd160_f4(vals[4], vals[0], vals[1]) + in_9 + ripemd160_k[4], (uint)ripemd160_rl[67]) + vals[2];
+ vals[0] = rotate(vals[0], 10U);
+ vals[8] = rotate(vals[8] + ripemd160_f0(vals[9], vals[5], vals[6]) + in_4 + ripemd160_kp[4], (uint)ripemd160_rlp[67]) + vals[7];
+ vals[5] = rotate(vals[5], 10U);
+ vals[2] = rotate(vals[2] + ripemd160_f4(vals[3], vals[4], vals[0]) + in_7 + ripemd160_k[4], (uint)ripemd160_rl[68]) + vals[1];
+ vals[4] = rotate(vals[4], 10U);
+ vals[7] = rotate(vals[7] + ripemd160_f0(vals[8], vals[9], vals[5]) + in_1 + ripemd160_kp[4], (uint)ripemd160_rlp[68]) + vals[6];
+ vals[9] = rotate(vals[9], 10U);
+ vals[1] = rotate(vals[1] + ripemd160_f4(vals[2], vals[3], vals[4]) + in_12 + ripemd160_k[4], (uint)ripemd160_rl[69]) + vals[0];
+ vals[3] = rotate(vals[3], 10U);
+ vals[6] = rotate(vals[6] + ripemd160_f0(vals[7], vals[8], vals[9]) + in_5 + ripemd160_kp[4], (uint)ripemd160_rlp[69]) + vals[5];
+ vals[8] = rotate(vals[8], 10U);
+ vals[0] = rotate(vals[0] + ripemd160_f4(vals[1], vals[2], vals[3]) + in_2 + ripemd160_k[4], (uint)ripemd160_rl[70]) + vals[4];
+ vals[2] = rotate(vals[2], 10U);
+ vals[5] = rotate(vals[5] + ripemd160_f0(vals[6], vals[7], vals[8]) + in_8 + ripemd160_kp[4], (uint)ripemd160_rlp[70]) + vals[9];
+ vals[7] = rotate(vals[7], 10U);
+ vals[4] = rotate(vals[4] + ripemd160_f4(vals[0], vals[1], vals[2]) + in_10 + ripemd160_k[4], (uint)ripemd160_rl[71]) + vals[3];
+ vals[1] = rotate(vals[1], 10U);
+ vals[9] = rotate(vals[9] + ripemd160_f0(vals[5], vals[6], vals[7]) + in_7 + ripemd160_kp[4], (uint)ripemd160_rlp[71]) + vals[8];
+ vals[6] = rotate(vals[6], 10U);
+ vals[3] = rotate(vals[3] + ripemd160_f4(vals[4], vals[0], vals[1]) + in_14 + ripemd160_k[4], (uint)ripemd160_rl[72]) + vals[2];
+ vals[0] = rotate(vals[0], 10U);
+ vals[8] = rotate(vals[8] + ripemd160_f0(vals[9], vals[5], vals[6]) + in_6 + ripemd160_kp[4], (uint)ripemd160_rlp[72]) + vals[7];
+ vals[5] = rotate(vals[5], 10U);
+ vals[2] = rotate(vals[2] + ripemd160_f4(vals[3], vals[4], vals[0]) + in_1 + ripemd160_k[4], (uint)ripemd160_rl[73]) + vals[1];
+ vals[4] = rotate(vals[4], 10U);
+ vals[7] = rotate(vals[7] + ripemd160_f0(vals[8], vals[9], vals[5]) + in_2 + ripemd160_kp[4], (uint)ripemd160_rlp[73]) + vals[6];
+ vals[9] = rotate(vals[9], 10U);
+ vals[1] = rotate(vals[1] + ripemd160_f4(vals[2], vals[3], vals[4]) + in_3 + ripemd160_k[4], (uint)ripemd160_rl[74]) + vals[0];
+ vals[3] = rotate(vals[3], 10U);
+ vals[6] = rotate(vals[6] + ripemd160_f0(vals[7], vals[8], vals[9]) + in_13 + ripemd160_kp[4], (uint)ripemd160_rlp[74]) + vals[5];
+ vals[8] = rotate(vals[8], 10U);
+ vals[0] = rotate(vals[0] + ripemd160_f4(vals[1], vals[2], vals[3]) + in_8 + ripemd160_k[4], (uint)ripemd160_rl[75]) + vals[4];
+ vals[2] = rotate(vals[2], 10U);
+ vals[5] = rotate(vals[5] + ripemd160_f0(vals[6], vals[7], vals[8]) + in_14 + ripemd160_kp[4], (uint)ripemd160_rlp[75]) + vals[9];
+ vals[7] = rotate(vals[7], 10U);
+ vals[4] = rotate(vals[4] + ripemd160_f4(vals[0], vals[1], vals[2]) + in_11 + ripemd160_k[4], (uint)ripemd160_rl[76]) + vals[3];
+ vals[1] = rotate(vals[1], 10U);
+ vals[9] = rotate(vals[9] + ripemd160_f0(vals[5], vals[6], vals[7]) + in_0 + ripemd160_kp[4], (uint)ripemd160_rlp[76]) + vals[8];
+ vals[6] = rotate(vals[6], 10U);
+ vals[3] = rotate(vals[3] + ripemd160_f4(vals[4], vals[0], vals[1]) + in_6 + ripemd160_k[4], (uint)ripemd160_rl[77]) + vals[2];
+ vals[0] = rotate(vals[0], 10U);
+ vals[8] = rotate(vals[8] + ripemd160_f0(vals[9], vals[5], vals[6]) + in_3 + ripemd160_kp[4], (uint)ripemd160_rlp[77]) + vals[7];
+ vals[5] = rotate(vals[5], 10U);
+ vals[2] = rotate(vals[2] + ripemd160_f4(vals[3], vals[4], vals[0]) + in_15 + ripemd160_k[4], (uint)ripemd160_rl[78]) + vals[1];
+ vals[4] = rotate(vals[4], 10U);
+ vals[7] = rotate(vals[7] + ripemd160_f0(vals[8], vals[9], vals[5]) + in_9 + ripemd160_kp[4], (uint)ripemd160_rlp[78]) + vals[6];
+ vals[9] = rotate(vals[9], 10U);
+ vals[1] = rotate(vals[1] + ripemd160_f4(vals[2], vals[3], vals[4]) + in_13 + ripemd160_k[4], (uint)ripemd160_rl[79]) + vals[0];
+ vals[3] = rotate(vals[3], 10U);
+ vals[6] = rotate(vals[6] + ripemd160_f0(vals[7], vals[8], vals[9]) + in_11 + ripemd160_kp[4], (uint)ripemd160_rlp[79]) + vals[5];
+ vals[8] = rotate(vals[8], 10U);
+
+ t = out[1] + vals[2] + vals[8];
+ out[1] = out[2] + vals[3] + vals[9];
+ out[2] = out[3] + vals[4] + vals[5];
+ out[3] = out[4] + vals[0] + vals[6];
+ out[4] = out[0] + vals[1] + vals[7];
+ out[0] = t;
+
+}
 
 #ifdef TEST_KERNELS
 /*
@@ -1290,7 +1644,8 @@ int compute_and_test_address(bignum * zi, __global bn_word * xy, __global uchar 
 ) {
 	uint hash1[16], hash2[16];
 	bn_word wh, wl;
-
+	bignum x;
+	
 	/*
 	 * Multiply the coordinates by the inverted Z values.
 	 * Stash the coordinates in the hash buffer.
@@ -1307,25 +1662,20 @@ int compute_and_test_address(bignum * zi, __global bn_word * xy, __global uchar 
 
 #ifdef TRACE
 	if (dump) {
-		printf("Point x: %x %x %x %x %x %x %x %x\n", c.d[0],c.d[1],c.d[2],c.d[3],c.d[4],c.d[5],c.d[6],c.d[7]);
+		printf("Point x: %x %x %x %x %x %x %x %x\n", c->d[0],c->d[1],c->d[2],c->d[3],c->d[4],c->d[5],c->d[6],c->d[7]);
 	}
 #endif
 	bn_mul_mont(c, c, workspace);  /* X / Z^2 */
-#ifdef TRACE
-	if (dump) {
-		printf("Generated x: %x %x %x %x %x %x %x %x\n", c.d[0],c.d[1],c.d[2],c.d[3],c.d[4],c.d[5],c.d[6],c.d[7]);
-	}
-#endif
 	bn_from_mont(c, c);
 
+#ifdef TRACE
+	if (dump) {
+		printf("Generated x: %x %x %x %x %x %x %x %x\n", c->d[0],c->d[1],c->d[2],c->d[3],c->d[4],c->d[5],c->d[6],c->d[7]);
+	}
+#endif
+	x = *c;
+	
 	bn_mul_mont(workspace, workspace, zi);  /* 1 / Z^3 */
-
-#define hash_ec_point_inner_3(i)		\
-		wl = wh;				\
-		wh = c->d[(BN_NWORDS - 1) - i];		\
-		hash1[i] = (wl << 24) | (wh >> 8);
-
-	bn_unroll(hash_ec_point_inner_3);
 
 #define hash_ec_point_inner_4(i)				\
 		c->d[i] = xy[(ACCESS_STRIDE/2) + i*ACCESS_STRIDE];
@@ -1334,20 +1684,24 @@ int compute_and_test_address(bignum * zi, __global bn_word * xy, __global uchar 
 
 	bn_mul_mont(c, c, workspace);  /* Y / Z^3 */
 
-#ifdef TRACE
-	if (dump) {
-		printf("Generated y: %x %x %x %x %x %x %x %x\n", c.d[0],c.d[1],c.d[2],c.d[3],c.d[4],c.d[5],c.d[6],c.d[7]);
-	}
-#endif
 	bn_from_mont(c, c);
 	
+#ifdef TRACE
+	if (dump) {
+		printf("Generated y: %x %x %x %x %x %x %x %x\n", c->d[0],c->d[1],c->d[2],c->d[3],c->d[4],c->d[5],c->d[6],c->d[7]);
+	}
+#endif
 	int found = 0;
 	
-	bn_word save_wh = wh;
-	for (int compressed_address=0; compressed_address<2; compressed_address++) {
-		wh = save_wh;
-		hash1[0] = (hash1[0]&0xffffff)|(compressed_address ? 0x02000000 : 0x04000000);
-		
+	for (int compressed_address=1; compressed_address>=0; compressed_address--) {
+		wh = (compressed_address ? 0x02 : 0x04);
+#define hash_ec_point_inner_3(i)		\
+		wl = wh;				\
+		wh = x.d[(BN_NWORDS - 1) - i];		\
+		hash1[i] = (wl << 24) | (wh >> 8);
+
+		bn_unroll(hash_ec_point_inner_3);
+
 		if (!compressed_address) {
 			#define hash_ec_point_inner_5(i)			\
 				wl = wh;					\
@@ -1379,12 +1733,13 @@ int compute_and_test_address(bignum * zi, __global bn_word * xy, __global uchar 
 			printf("\n");
 		}
 #endif
+		
 		/*
 		 * Hash the first 64 bytes of the buffer
 		 */
 		sha2_256_init(hash2);
 		sha2_256_block(hash2, hash1);
-
+		
 		if (!compressed_address) {
 			/*
 			 * Hash the last byte of the buffer + SHA-2 padding
@@ -1419,18 +1774,21 @@ int compute_and_test_address(bignum * zi, __global bn_word * xy, __global uchar 
 
 		hash256_unroll(hash_ec_point_inner_6);
 
-		hash2[8] = bswap32(0x80000000);
+		/*hash2[8] = bswap32(0x80000000);
 		hash2[9] = 0;
 		hash2[10] = 0;
 		hash2[11] = 0;
 		hash2[12] = 0;
 		hash2[13] = 0;
 		hash2[14] = 32 * 8;
-		hash2[15] = 0;
+		hash2[15] = 0;*/
 		
 		uint *hash_out = hash1+8;
 		ripemd160_init(hash_out);
-		ripemd160_block(hash_out, hash2);
+		//ripemd160_block(hash_out, hash2);
+		ripemd160_block1(hash_out, hash2[0],hash2[1],hash2[2],hash2[3],hash2[4],hash2[5],hash2[6],hash2[7],
+			bswap32(0x80000000),0,0,0,0,0,32 * 8,0
+		);
 		
 		// test the address
 #ifdef TRACE
@@ -1590,7 +1948,11 @@ heap_invert_and_check(
 		bn_mul_mont(&c, &a, &z);
 		
 		__global bn_word * point = points_in + ((((2 * lcell) / ACCESS_STRIDE) * ACCESS_BUNDLE) + (lcell % (ACCESS_STRIDE/2)));
-		if (compute_and_test_address(&c, point, bitmap, bitmap_len, &a, &b, localhash)) {
+		if (compute_and_test_address(&c, point, bitmap, bitmap_len, &a, &b, localhash
+#ifdef TRACE
+		, 0
+#endif
+		)) {
 			found[-atomic_dec(found)] = lcell;
 		}
 
@@ -1601,7 +1963,11 @@ heap_invert_and_check(
 		start = (((lcell / ACCESS_STRIDE) * ACCESS_BUNDLE) +
 			 (lcell % ACCESS_STRIDE));
 		point = points_in + ((((2 * lcell) / ACCESS_STRIDE) * ACCESS_BUNDLE) + (lcell % (ACCESS_STRIDE/2)));
-		if (compute_and_test_address(&c, point, bitmap, bitmap_len, &b, &a, localhash)) {
+		if (compute_and_test_address(&c, point, bitmap, bitmap_len, &b, &a, localhash
+#ifdef TRACE
+		, lcell==0
+#endif
+		)) {
 			found[-atomic_dec(found)] = lcell;
 		}
 

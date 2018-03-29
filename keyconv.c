@@ -28,7 +28,7 @@ usage(const char *progname)
 "Usage: %s [-8] [-e|-E <password>] [-c <key>] [<key>]\n"
 "-G            Generate a key pair and output the full public key\n"
 "-8            Output key in PKCS#8 form\n"
-"-C 		   Generate Compressed key\n"
+"-C            Generate Compressed key\n"
 "-e            Encrypt output key, prompt for password\n"
 "-X <version>  Generate address with the given version\n"
 "-p <privtyp>  The priv-type belonging to the version, default <version>+128\n"
