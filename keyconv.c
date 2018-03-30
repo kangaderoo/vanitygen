@@ -178,6 +178,13 @@ main(int argc, char **argv)
 				       "Enter import password:", 0) ||
 		    !vg_decode_privkey_any(pkey, &privtype, key_in, pwbuf))
 			return 1;
+	} else if (res == 0) {
+		BIGNUM *pk = NULL;
+		if (BN_hex2bn(&pk, key_in)) {
+			res = 1;
+			vg_set_privkey(pk, pkey);
+		}
+		BN_free(pk);
 	}
 
 	if (!res) {

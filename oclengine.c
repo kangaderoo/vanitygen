@@ -1616,8 +1616,9 @@ int vg_ocl_prefix_check(vg_ocl_context_t *vocp, int slot)
 		
 		for (int i=0; i<found_count; i++) {
 			vxcp->vxc_delta = orig_delta+ocl_found_out[1+i];
-			for (vxcp->vc_combined_compressed=0; vxcp->vc_combined_compressed<2 && !res; vxcp->vc_combined_compressed++) {
+			for (vxcp->vc_combined_compressed=0; vxcp->vc_combined_compressed<2; vxcp->vc_combined_compressed++) {
 				vg_exec_context_calc_address(vxcp);
+				if (vocp->base.vxc_vc->vc_verbose > 1) {printf("check key=");dumpbn(EC_KEY_get0_private_key(vxcp->vxc_key));}
 
 				/* Make sure the GPU produced the expected hash */
 				if (test_func(vxcp)) {
