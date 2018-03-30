@@ -15,7 +15,9 @@ make oclvanitygen
 
 ./oclvanitygen -f addresses.txt -o found.txt -k lastkey.txt 5KHon4xmV31t9dFSHzeN3KF3R1EvjnSRCuy5ZcVEL83NZXzsyeE
 
-An argument if the starting private key.
+An argument if the starting private key. Or, in HEX:
+
+./oclvanitygen -f addresses.txt -o found.txt -k lastkey.txt 1AD2662234520000000000
 
 Tips for Windows build: 
 
@@ -29,7 +31,7 @@ Set the following variables:
 
  SET LIB=C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\LIB\amd64;C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\ATLMFC\LIB\amd64;C:\Program Files (x86)\Windows Kits\10\lib\10.0.16299.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\NETFXSDK\4.6.1\lib\um\x64;C:\Program Files (x86)\Windows Kits\10\lib\10.0.16299.0\um\x64
 
- SET PATH="C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\bin";%PATH%
+ SET PATH="C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\bin\amd64";%PATH%
 
 Run:
 
