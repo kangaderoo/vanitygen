@@ -439,7 +439,8 @@ vg_output_match_console(vg_context_t *vcp, vg_exec_context_t *vxcp, const char *
 {
 	unsigned char key_buf[512], *pend;
 	char addr_buf[64], addr2_buf[64];
-	char privkey_buf[VG_PROTKEY_MAX_B58];
+	char privkey_buf[128];
+	char * privkey_str = privkey_buf;
 	const char *keytype = "Privkey";
 	int len;
 	int isscript = (vcp->vc_format == VCF_SCRIPT);
@@ -490,14 +491,18 @@ vg_output_match_console(vg_context_t *vcp, vg_exec_context_t *vxcp, const char *
 	}
 	if (!vcp->vc_key_protect_pass) {
 //		if (vcp->vc_combined_compressed)
+		privkey_str = BN_bn2hex(EC_KEY_get0_private_key(pkey));
+		//printf("Privkey (hex): %s\n", privkey_str);
+	/*
 		if (vxcp->vc_combined_compressed)
 			vg_encode_privkey_compressed(pkey, vcp->vc_privtype, privkey_buf);
 		else
 			vg_encode_privkey(pkey, vcp->vc_privtype, privkey_buf);
+		*/
 	}
 
 	if (!vcp->vc_result_file || (vcp->vc_verbose > 1)) {
-		printf("\r%79s\rPattern: %s\n", "", pattern);
+		//printf("\r%79s\rPattern: %s\n", "", pattern);
 	}
 
 	if (vcp->vc_verbose > 0) {
@@ -506,8 +511,6 @@ vg_output_match_console(vg_context_t *vcp, vg_exec_context_t *vxcp, const char *
 			len = i2o_ECPublicKey(pkey, &pend);
 			printf("Pubkey (hex): ");
 			dumphex(key_buf, len);
-			printf("Privkey (hex): ");
-			dumpbn(EC_KEY_get0_private_key(pkey));
 			pend = key_buf;
 			len = i2d_ECPrivateKey(pkey, &pend);
 			printf("Privkey (ASN1): ");
@@ -520,8 +523,8 @@ vg_output_match_console(vg_context_t *vcp, vg_exec_context_t *vxcp, const char *
 		if (isscript)
 			printf("P2SHAddress: %s\n", addr2_buf);
 		printf("\nAddress: %s\n"
-		       "%s: %s\n",
-		       addr_buf, keytype, privkey_buf);
+		       "%s (hex): %s\n",
+		       addr_buf, keytype, privkey_str);
 	}
 
 	if (vcp->vc_result_file) {
@@ -531,15 +534,12 @@ vg_output_match_console(vg_context_t *vcp, vg_exec_context_t *vxcp, const char *
 				"ERROR: could not open result file: %s\n",
 				strerror(errno));
 		} else {
-			fprintf(fp,
-				"Pattern: %s\n"
-				, pattern);
 			if (isscript)
 				fprintf(fp, "P2SHAddress: %s\n", addr2_buf);
 			fprintf(fp,
 				"Address: %s\n"
-				"%s: %s\n",
-				addr_buf, keytype, privkey_buf);
+				"%s (hex): %s\n",
+				addr_buf, keytype, privkey_str);
 			fclose(fp);
 		}
 	}
