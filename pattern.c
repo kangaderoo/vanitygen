@@ -590,6 +590,7 @@ vg_context_start_threads(vg_context_t *vcp)
 	int res;
 
 	for (vxcp = vcp->vc_threads; vxcp != NULL; vxcp = vxcp->vxc_next) {
+        if (vcp->vc_verbose > 1) printf("\nStart a thread");
 		res = pthread_create((pthread_t *) &vxcp->vxc_pthread,
 				     NULL,
 				     (void *(*)(void *)) vxcp->vxc_threadfunc,

@@ -942,7 +942,7 @@ vg_ocl_init(vg_context_t *vcp, vg_ocl_context_t *vocp, cl_device_id did,
 				"-DAMD_BFI_INT ");
 	if (vocp->voc_quirks & VG_OCL_NV_VERBOSE)
 		end += snprintf(optbuf + end, sizeof(optbuf) - end,
-				"-cl-nv-verbose -cl-nv-maxrregcount=128 ");
+				"-cl-nv-verbose -cl-nv-maxrregcount=85 ");
 	end += snprintf(optbuf + end, sizeof(optbuf) - end, "-DLOCAL_MEM_SIZE=%ld ", localmemsize-16);
 
 	if (!vg_ocl_load_program(vcp, vocp, "calc_addrs.cl", optbuf))
@@ -1990,7 +1990,7 @@ vg_opencl_loop(vg_exec_context_t *arg)
 		fprintf(stderr, "ERROR: Could not map column buffer\n");
 		break;
 	}
-	if (vcp->vc_verbose > 1) printf("\nCopy %d sequential points to the device\n", ncols);
+	if (vcp->vc_verbose > 1) printf("\nCopy %d sequential points to the device", ncols);
 	for (i = 0; i < ncols; i++)
 		vg_ocl_put_point_tpa(ocl_points_in, i, ppbase[i]);
 	vg_ocl_unmap_arg_buffer(vocp, 0, A_ROW, ocl_points_in);
@@ -2010,7 +2010,7 @@ vg_opencl_loop(vg_exec_context_t *arg)
 	EC_POINTs_make_affine(pgroup, nrows, pprow, vxcp->vxc_bnctx);
 	
 	/* Copy the row stride array to the device */
-	if (vcp->vc_verbose > 1) printf("\nCopy the row stride array to the device\n");
+	if (vcp->vc_verbose > 1) printf("\nCopy the row stride array to the device");
 	ocl_strides_in = (unsigned char *)
 		vg_ocl_map_arg_buffer(vocp, slot, A_COL, 1);
 	if (!ocl_strides_in) {
@@ -2039,7 +2039,7 @@ vg_opencl_loop(vg_exec_context_t *arg)
 		if (!vg_ocl_kernel_start(vocp, 0, ncols, nrows, vocp->voc_ocl_invsize))
 			halt = 1;
 
-		/* Move the row increments forward */
+		if (vcp->vc_verbose > 1) printf("\nMove the row increments forward");
 		for (i = 0; i < ncols; i++) {
 			EC_POINT_add(pgroup,
 				     ppbase[i],
@@ -2054,13 +2054,14 @@ vg_opencl_loop(vg_exec_context_t *arg)
 			fprintf(stderr, "ERROR: Could not map column buffer\n");
 			break;
 		}
-		if (vcp->vc_verbose > 1) printf("\nCopy %d sequential points to the device\n", ncols);
+        
+		if (vcp->vc_verbose > 1) printf("\nCopy %d sequential points to the device", ncols);
 		for (i = 0; i < ncols; i++)
 			vg_ocl_put_point_tpa(ocl_points_in, i, ppbase[i]);
 		vg_ocl_unmap_arg_buffer(vocp, 0, A_ROW, ocl_points_in);
-
 		
 		// Wait for the GPU to complete its job
+		if (vcp->vc_verbose > 1) printf("\nWait for the GPU to complete its job");
 		if (!vg_ocl_kernel_wait(vocp, slot))
 			halt = 1;
 		
@@ -2080,7 +2081,7 @@ vg_opencl_loop(vg_exec_context_t *arg)
 
 	}
 	
-	// save the priv. key to a file
+	if (vcp->vc_verbose > 1) printf("\nsave the priv. key to a file");
 	if (save_file_name) {
 		//vg_encode_privkey(vxcp->vxc_key, vcp->vc_privtype, privkey_buf);
 		FILE *sf = fopen(save_file_name, "w");
