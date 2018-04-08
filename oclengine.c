@@ -1145,6 +1145,26 @@ vg_ocl_unmap_arg_buffer(vg_ocl_context_t *vocp, int slot,
 	}
 }
 
+void
+vg_ocl_write_arg_buffer(vg_ocl_context_t *vocp, int slot, int arg, void *buf)
+{
+	cl_int ret;
+
+	assert((slot >= 0) && (slot < MAX_SLOT));
+
+	ret = clEnqueueWriteBuffer(vocp->voc_oclcmdq,
+				      vocp->voc_args[slot][arg],
+                      CL_FALSE,
+                      0, vocp->voc_arg_size[slot][arg],
+				      buf,
+				      0, NULL, NULL);
+	if (ret != CL_SUCCESS) {
+		fprintf(stderr, "clEnqueueWriteBuffer(%d): ", arg);
+		vg_ocl_error(vocp, ret, NULL);
+		return;
+	}
+}
+
 int
 vg_ocl_kernel_int_arg(vg_ocl_context_t *vocp, int slot,
 		      int arg, int value)
@@ -1863,7 +1883,7 @@ vg_opencl_loop(vg_exec_context_t *arg)
 	EC_POINT *pseek = NULL;
 
 	unsigned char *ocl_points_in, *ocl_strides_in;
-
+    
 	vg_context_t *vcp = vocp->base.vxc_vc;
 	vg_exec_context_t *vxcp = &vocp->base;
 
@@ -1928,6 +1948,10 @@ vg_opencl_loop(vg_exec_context_t *arg)
         
 	vocp->voc_rekey_func(vocp);
 
+    ocl_points_in = (unsigned char *)malloc(vocp->voc_arg_size[0][A_ROW]);
+    printf("%d/%d\n", vocp->voc_arg_size[0][A_ROW], vocp->voc_arg_size[0][A_COL]);
+    ocl_strides_in = (unsigned char *)malloc(vocp->voc_arg_size[0][A_COL]);
+
 	vg_exec_context_upgrade_lock(vxcp);
 
 #ifdef TRACE
@@ -1984,16 +2008,10 @@ vg_opencl_loop(vg_exec_context_t *arg)
 	}
 
 	/* Fill the sequential point array */
-	ocl_points_in = (unsigned char *)
-		vg_ocl_map_arg_buffer(vocp, 0, A_ROW, 1);
-	if (!ocl_points_in) {
-		fprintf(stderr, "ERROR: Could not map column buffer\n");
-		break;
-	}
 	if (vcp->vc_verbose > 1) printf("\nCopy %d sequential points to the device", ncols);
 	for (i = 0; i < ncols; i++)
 		vg_ocl_put_point_tpa(ocl_points_in, i, ppbase[i]);
-	vg_ocl_unmap_arg_buffer(vocp, 0, A_ROW, ocl_points_in);
+	vg_ocl_write_arg_buffer(vocp, 0, A_ROW, ocl_points_in);
 
 	/*
 	 * Set up the initial row increment table.
@@ -2011,20 +2029,10 @@ vg_opencl_loop(vg_exec_context_t *arg)
 	
 	/* Copy the row stride array to the device */
 	if (vcp->vc_verbose > 1) printf("\nCopy the row stride array to the device");
-	ocl_strides_in = (unsigned char *)
-		vg_ocl_map_arg_buffer(vocp, slot, A_COL, 1);
-	if (!ocl_strides_in) {
-		fprintf(stderr,
-			"ERROR: Could not map row buffer "
-			"for slot %d\n", slot);
-		break;
-	}
 	memset(ocl_strides_in, 0, 64*nrows);
 	for (i = 0; i < nrows; i++)
-		vg_ocl_put_point(ocl_strides_in + (64*i),
-				 pprow[i]);
-	vg_ocl_unmap_arg_buffer(vocp, slot, A_COL, ocl_strides_in);
-	
+		vg_ocl_put_point(ocl_strides_in + (64*i), pprow[i]);
+	vg_ocl_write_arg_buffer(vocp, slot, A_COL, ocl_strides_in);
 
 	vxcp->vxc_delta = 1;
 
@@ -2048,17 +2056,11 @@ vg_opencl_loop(vg_exec_context_t *arg)
 				     vxcp->vxc_bnctx);
 		}
 		EC_POINTs_make_affine(pgroup, ncols, ppbase, vxcp->vxc_bnctx);
-		ocl_points_in = (unsigned char *)
-			vg_ocl_map_arg_buffer(vocp, 0, A_ROW, 1);
-		if (!ocl_points_in) {
-			fprintf(stderr, "ERROR: Could not map column buffer\n");
-			break;
-		}
         
 		if (vcp->vc_verbose > 1) printf("\nCopy %d sequential points to the device", ncols);
 		for (i = 0; i < ncols; i++)
 			vg_ocl_put_point_tpa(ocl_points_in, i, ppbase[i]);
-		vg_ocl_unmap_arg_buffer(vocp, 0, A_ROW, ocl_points_in);
+		vg_ocl_write_arg_buffer(vocp, 0, A_ROW, ocl_points_in);
 		
 		// Wait for the GPU to complete its job
 		if (vcp->vc_verbose > 1) printf("\nWait for the GPU to complete its job");
