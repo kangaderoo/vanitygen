@@ -1118,6 +1118,26 @@ vg_ocl_map_arg_buffer(vg_ocl_context_t *vocp, int slot,
 }
 
 void
+vg_ocl_read_arg_buffer(vg_ocl_context_t *vocp, int slot,
+		      int arg, void * mem)
+{
+	cl_int ret;
+
+	assert((slot >= 0) && (slot < MAX_SLOT));
+
+	ret = clEnqueueReadBuffer(vocp->voc_oclcmdq,
+				 vocp->voc_args[slot][arg],
+				 CL_TRUE,
+				 0, vocp->voc_arg_size[slot][arg],
+				 mem, 0, NULL,NULL);
+	if (ret != CL_SUCCESS) {
+		fprintf(stderr, "clEnqueueReadBuffer(%d): ", arg);
+		vg_ocl_error(vocp, ret, NULL);
+		return ;
+	}
+}
+
+void
 vg_ocl_unmap_arg_buffer(vg_ocl_context_t *vocp, int slot,
 			int arg, void *buf)
 {
@@ -1615,15 +1635,12 @@ int vg_ocl_prefix_check(vg_ocl_context_t *vocp, int slot)
 	int res = 0;
 
 	/* Retrieve the found indicator */
-	ocl_found_out = (uint32_t *)vg_ocl_map_arg_buffer(vocp, slot, A_FOUND, 2);
-	if (!ocl_found_out) {
-		fprintf(stderr,
-			"ERROR: Could not map result buffer"
-			" for slot %d\n", slot);
-		return 2;
-	}
+    
+	ocl_found_out = (uint32_t *)malloc(vocp->voc_arg_size[slot][A_FOUND]);
+    vg_ocl_read_arg_buffer(vocp, slot, A_FOUND, ocl_found_out);
 	found_count = ocl_found_out[0];
 	ocl_found_out[0] = -1;
+    vg_ocl_write_arg_buffer(vocp, slot, A_FOUND, ocl_found_out);
 
 	if (found_count != -1) {
 		found_count = -found_count-1;
@@ -1672,7 +1689,7 @@ int vg_ocl_prefix_check(vg_ocl_context_t *vocp, int slot)
 	}
 	vxcp->vxc_delta += (vocp->voc_ocl_cols * vocp->voc_ocl_rows);
 
-	vg_ocl_unmap_arg_buffer(vocp, slot, A_FOUND, ocl_found_out);
+    free(ocl_found_out);
 
 	return res;
 }
