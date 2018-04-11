@@ -62,7 +62,7 @@ usage(const char *name)
 "-f <file|->   File containing list of addresses, one per line\n"
 "              (Use \"-\" as the file name for stdin)\n"
 "-o <file>     Write pattern matches to <file>\n"
-"-k <file>     Periodically save current private key to the file",
+"-k <file>     Periodically save current private key to the file\n",
 version, name);
 }
 

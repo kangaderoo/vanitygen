@@ -351,9 +351,8 @@ bn_uadd_words_c_seq(bn_word *r, bn_word *a, __constant bn_word *b)
 	} while (0)
 
 #define bn_subb_word(r, a, b, t, c) do {	\
-		t = a - (b + c);		\
-		c = (!(a) && c) ? 1 : 0;	\
-		c |= (a < b) ? 1 : 0;		\
+		t = a - b - c;		\
+		c = t>a || (t==a && c);		\
 		r = t;				\
 	} while (0)
 
