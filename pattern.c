@@ -815,8 +815,7 @@ vg_prefix_context_add_patterns(vg_context_t *vcp,
 	return 1;
 }
 
-static int
-vg_prefix_test(vg_exec_context_t *vxcp)
+int vg_prefix_test(vg_exec_context_t *vxcp)
 {
 	vg_prefix_context_t *vcpp = (vg_prefix_context_t *) vxcp->vxc_vc;
 	vg_prefix_t *vp;

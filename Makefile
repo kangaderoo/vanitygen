@@ -1,5 +1,5 @@
 LIBS=-lpcre -lcrypto -lm -lpthread
-CFLAGS=-ggdb -O3 -Wall -march=native
+CFLAGS=-ggdb -Wall -march=native
 OBJS=vanitygen.o oclvanitygen.o oclvanityminer.o oclengine.o keyconv.o pattern.o util.o rmd160.o sha256.o custom_ec_bn.o
 PROGS=keyconv oclvanitygen
 

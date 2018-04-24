@@ -27,6 +27,9 @@
 #include <openssl/bn.h>
 #include <openssl/rand.h>
 #include <openssl/evp.h>
+#include <openssl/sha.h>
+#include <openssl/ripemd.h>
+#include <openssl/hmac.h>
 
 #ifdef __APPLE__
 #include <OpenCL/cl.h>
@@ -40,18 +43,19 @@
 #include "oclengine.h"
 #include "pattern.h"
 #include "util.h"
-
+#include <assert.h>
 
 #define MAX_SLOT 2
 #define MAX_ARG 10
-#define MAX_KERNEL 3
+#define MAX_KERNEL 4
 
 #define is_pow2(v) (!((v) & ((v)-1)))
 #define round_up_pow2(x, a) (((x) + ((a)-1)) & ~((a)-1))
 
 void vg_ocl_free_args(vg_ocl_context_t *vocp);
 void *vg_opencl_loop(vg_exec_context_t *arg);
-
+int vg_prefix_test(vg_exec_context_t *vxcp);
+const EC_GROUP *pgroup;
 
 /* OpenCL address searching mode */
 struct _vg_ocl_context_s;
@@ -66,7 +70,6 @@ struct _vg_ocl_context_s {
 	cl_program			voc_oclprog;
 	vg_ocl_init_t			voc_init_func;
 	vg_ocl_init_t			voc_rekey_func;
-	vg_ocl_check_t			voc_check_func;
 	int				voc_quirks;
 	int				voc_nslots;
 	cl_kernel			voc_oclkernel[MAX_SLOT][MAX_KERNEL];
@@ -654,13 +657,6 @@ vg_ocl_load_program(vg_context_t *vcp, vg_ocl_context_t *vocp,
 		fprintf(stderr,
 			"OpenCL compiler flags: %s\n", opts ? opts : "");
 
-	sz = 128 * 1024;
-	buf = (char *) malloc(sz);
-	if (!buf) {
-		fprintf(stderr, "Could not allocate program buffer\n");
-		return 0;
-	}
-
 	kfp = fopen(filename, "r");
 	if (!kfp) {
 		fprintf(stderr, "Error loading kernel file '%s': %s\n",
@@ -668,9 +664,19 @@ vg_ocl_load_program(vg_context_t *vcp, vg_ocl_context_t *vocp,
 		free(buf);
 		return 0;
 	}
+    
+    fseek(kfp, 0, SEEK_END);
+    sz = ftell(kfp);
+    fseek(kfp, 0, SEEK_SET);
+	buf = (char *) malloc(sz+1);
+	if (!buf) {
+		fprintf(stderr, "Could not allocate program buffer\n");
+		return 0;
+	}
 
 	len = fread(buf, 1, sz, kfp);
 	fclose(kfp);
+    buf[len] = 0;
 
 	if (!len) {
 		fprintf(stderr, "Short read on CL kernel\n");
@@ -847,9 +853,10 @@ vg_ocl_load_program(vg_context_t *vcp, vg_ocl_context_t *vocp,
 
 out:
 	vocp->voc_oclprog = prog;
-	if (!vg_ocl_create_kernel(vocp, 0, "ec_add_grid") ||
+	if (!vg_ocl_create_kernel(vocp, 0, "ec_generate_points") ||
 	    !vg_ocl_create_kernel(vocp, 1, "heap_invert_and_check") ||
-	    !vg_ocl_create_kernel(vocp, 2, "fill_bitmap")
+	    !vg_ocl_create_kernel(vocp, 2, "fill_bitmap") ||
+	    !vg_ocl_create_kernel(vocp, 3, "ec_add_grid")
 	    ) {
 		clReleaseProgram(vocp->voc_oclprog);
 		vocp->voc_oclprog = NULL;
@@ -975,8 +982,8 @@ enum Arg {
 	A_FOUND = 0,
 	A_Z_HEAP,
 	A_POINTS,
-	A_ROW,
-	A_COL,
+	A_INCREMENT,
+    A_START,
 	A_ADDRESSES,
 	A_ADDRESS_COUNT,
 	A_BITMAP,
@@ -987,13 +994,13 @@ int vg_ocl_arg_map[][8] = {
 	/* found */
 	{ 1, 5, -1 },
 	/* z_heap */
-	{ 0, 1, 1, 0, -1 },
+	{ 0, 1, 1, 0, 3, 1, -1 },
 	/* points */
-	{ 0, 0, 1, 2, -1 },
-	/* row_in */
-	{ 0, 2, -1 },
-	/* col_in */
-	{ 0, 3, -1 },
+	{ 0, 0, 1, 2, 3, 0, -1 },
+	/* increment */
+	{ 3, 2, -1 },
+    /* start */
+    { 0, 2, -1},
 	/* addresses */
 	{ 2, 0, 1, 6, -1},
 	/* address count */
@@ -1029,7 +1036,7 @@ vg_ocl_kernel_arg_alloc(vg_ocl_context_t *vocp, int slot,
 			       NULL,
 			       &ret);
 	if (!clbuf) {
-		fprintf(stderr, "clCreateBuffer(%d,%d) size=%lld: ", slot, arg, size);
+		fprintf(stderr, "clCreateBuffer(%d,%d) size=%ld: ", slot, arg, size);
 		vg_ocl_error(vocp, ret, NULL);
 		return 0;
 	}
@@ -1289,13 +1296,43 @@ vg_ocl_kernel_dead(vg_ocl_context_t *vocp, int slot)
 }
 
 int
-vg_ocl_kernel_start(vg_ocl_context_t *vocp, int slot, int ncol, int nrow,
-		    int invsize)
+vg_ocl_kernel_init(vg_ocl_context_t *vocp, int npoints, BIGNUM * start)
+{
+	cl_int ret;
+	cl_event ev;
+	size_t globalws[1] = { npoints };
+
+    // set the 'start' bignum argument
+    unsigned char bytes[32];
+    memset(bytes, 0, 32);
+    BN_bn2bin(start, bytes+32-BN_num_bytes(start));
+    for (int i=0; i<16; i++) {
+        unsigned tmp = bytes[i];
+        bytes[i] = bytes[31-i];
+        bytes[31-i] = tmp;
+    }
+    vg_ocl_write_arg_buffer(vocp, 0, A_START, bytes);
+    
+	ret = clEnqueueNDRangeKernel(vocp->voc_oclcmdq,
+				     vocp->voc_oclkernel[0][0],
+				     1,
+				     NULL, globalws, NULL,
+				     0, NULL,
+				     &ev);
+	if (ret != CL_SUCCESS) {
+		vg_ocl_error(vocp, ret, "clEnqueueNDRange(0)");
+		return 0;
+	}
+    return 1;
+}
+
+int
+vg_ocl_kernel_start(vg_ocl_context_t *vocp, int slot, int npoints, int invsize, BIGNUM * start, int first)
 {
 	cl_int val, ret;
 	cl_event ev;
-	size_t globalws[2] = { ncol, nrow };
-	size_t invws = (ncol * nrow) / invsize;
+	size_t globalws[1] = { npoints };
+	size_t invws = npoints / invsize;
 
 	assert(!vocp->voc_oclkrnwait[slot]);
 
@@ -1303,7 +1340,7 @@ vg_ocl_kernel_start(vg_ocl_context_t *vocp, int slot, int ncol, int nrow,
 	assert(is_pow2(invsize) && (invsize > 1));
 
 	val = invsize;
-        // batch argument for heap_invert
+    // batch argument for heap_invert
 	ret = clSetKernelArg(vocp->voc_oclkernel[slot][1],
 			     1,
 			     sizeof(val),
@@ -1312,15 +1349,37 @@ vg_ocl_kernel_start(vg_ocl_context_t *vocp, int slot, int ncol, int nrow,
 		vg_ocl_error(vocp, ret, "clSetKernelArg(ncol)");
 		return 0;
 	}
-        // ec_add_grid(__global bn_word *points_out, __global bn_word *z_heap, __global bn_word *row_in, __global bignum *col_in)
-	ret = clEnqueueNDRangeKernel(vocp->voc_oclcmdq,
-				     vocp->voc_oclkernel[slot][0],
-				     2,
+    
+    if (first) {
+        // set the 'start' bignum argument
+        unsigned char bytes[32];
+        memset(bytes, 0, 32);
+        BN_bn2bin(start, bytes+32-BN_num_bytes(start));
+        for (int i=0; i<16; i++) {
+            unsigned tmp = bytes[i];
+            bytes[i] = bytes[31-i];
+            bytes[31-i] = tmp;
+        }
+        vg_ocl_write_arg_buffer(vocp, 0, A_START, bytes);
+        
+        // ec_generate_points
+        ret = clEnqueueNDRangeKernel(vocp->voc_oclcmdq,
+                         vocp->voc_oclkernel[0][0],
+                         1,
+                         NULL, globalws, NULL,
+                         0, NULL,
+                         &ev);
+    } else {
+        // ec_add_grid
+        ret = clEnqueueNDRangeKernel(vocp->voc_oclcmdq,
+				     vocp->voc_oclkernel[slot][3],
+				     1,
 				     NULL, globalws, NULL,
 				     0, NULL,
 				     &ev);
+    }
 	if (ret != CL_SUCCESS) {
-		vg_ocl_error(vocp, ret, "clEnqueueNDRange(0)");
+		vg_ocl_error(vocp, ret, "clEnqueueNDRange");
 		return 0;
 	}
 
@@ -1374,16 +1433,14 @@ vg_ocl_kernel_wait(vg_ocl_context_t *vocp, int slot)
 }
 
 
-INLINE void
-vg_ocl_get_bignum_raw(BIGNUM *bn, const unsigned char *buf)
+void vg_ocl_get_bignum_raw(BIGNUM *bn, const unsigned char *buf)
 {
 	bn_expand(bn, 256);
 	memcpy(bn->d, buf, 32);
 	bn->top = (32 / sizeof(BN_ULONG));
 }
 
-INLINE void
-vg_ocl_put_bignum_raw(unsigned char *buf, const BIGNUM *bn)
+void vg_ocl_put_bignum_raw(unsigned char *buf, const BIGNUM *bn)
 {
 	int bnlen = (bn->top * sizeof(BN_ULONG));
 	if (bnlen >= 32) {
@@ -1427,8 +1484,7 @@ struct ec_point_st {
 	int Z_is_one;
 };
 
-INLINE void
-vg_ocl_get_point(EC_POINT *ppnt, const unsigned char *buf)
+void vg_ocl_get_point(EC_POINT *ppnt, const unsigned char *buf)
 {
 	static const unsigned char mont_one[] = { 0x01,0x00,0x00,0x03,0xd1 };
 	vg_ocl_get_bignum_raw(&ppnt->X, buf);
@@ -1439,16 +1495,14 @@ vg_ocl_get_point(EC_POINT *ppnt, const unsigned char *buf)
 	}
 }
 
-INLINE void
-vg_ocl_put_point(unsigned char *buf, const EC_POINT *ppnt)
+void vg_ocl_put_point(unsigned char *buf, const EC_POINT *ppnt)
 {
 	assert(ppnt->Z_is_one);
 	vg_ocl_put_bignum_raw(buf, &ppnt->X);
 	vg_ocl_put_bignum_raw(buf + 32, &ppnt->Y);
 }
 
-void
-vg_ocl_put_point_tpa(unsigned char *buf, int cell, const EC_POINT *ppnt)
+void vg_ocl_put_point_tpa(unsigned char *buf, int cell, const EC_POINT *ppnt)
 {
 	unsigned char pntbuf[64];
 	int start, i;
@@ -1467,8 +1521,7 @@ vg_ocl_put_point_tpa(unsigned char *buf, int cell, const EC_POINT *ppnt)
 		       4);
 }
 
-void
-vg_ocl_get_point_tpa(EC_POINT *ppnt, const unsigned char *buf, int cell)
+void vg_ocl_get_point_tpa(EC_POINT *ppnt, const unsigned char *buf, int cell)
 {
 	unsigned char pntbuf[64];
 	int start, i;
@@ -1498,68 +1551,13 @@ show_elapsed(struct timeval *tv, const char *place)
 }
 
 
-/*
- * GPU address matching methods
- *
- * gethash: GPU computes and returns all address hashes.
- *  + Works with any matching method, including regular expressions.
- *  - The CPU will not be able to keep up with mid- to high-end GPUs.
- *
- * prefix: GPU computes hash, searches a range list, and discards.
- *  + Fast, minimal work for CPU.
- */
-
 int vg_ocl_gethash_check(vg_ocl_context_t *vocp, int slot)
 {
-	vg_exec_context_t *vxcp = &vocp->base;
-	vg_context_t *vcp = vocp->base.vxc_vc;
-	vg_test_func_t test_func = vcp->vc_test;
-	unsigned char *ocl_hashes_out;
-	int i, res = 0, round;
-
-	ocl_hashes_out = (unsigned char *)
-		vg_ocl_map_arg_buffer(vocp, slot, 0, 0);
-
-	if (!ocl_hashes_out) {
-		fprintf(stderr,
-			"ERROR: Could not map hash result buffer "
-			"for slot %d\n", slot);
-		return 2;
-	}
-
-	round = vocp->voc_ocl_cols * vocp->voc_ocl_rows;
-
-	for (i = 0; i < round; i++, vxcp->vxc_delta++) {
-		memcpy(&vxcp->vxc_binres[1],
-		       ocl_hashes_out + (20*i),
-		       20);
-
-		res = test_func(vxcp);
-		if (res)
-			break;
-	}
-
-	vg_ocl_unmap_arg_buffer(vocp, slot, 0, ocl_hashes_out);
-	return res;
+    return 1;
 }
 
 int vg_ocl_gethash_init(vg_ocl_context_t *vocp)
 {
-	int i;
-
-	if (!vg_ocl_create_kernel(vocp, 2, "hash_ec_point_get"))
-		return 0;
-
-	for (i = 0; i < vocp->voc_nslots; i++) {
-		/* Each slot gets its own hash output buffer */
-		if (!vg_ocl_kernel_arg_alloc(vocp, i, A_FOUND,
-					     2/*compressed&uncompressed */ * 20 *
-					     (size_t)vocp->voc_ocl_rows * vocp->voc_ocl_cols, 1))
-			return 0;
-	}
-
-	vocp->voc_rekey_func = NULL;
-	vocp->voc_check_func = vg_ocl_gethash_check;
 	return 1;
 }
 
@@ -1625,11 +1623,10 @@ int vg_ocl_prefix_rekey(vg_ocl_context_t *vocp)
 	return 1;
 }
 
-int vg_ocl_prefix_check(vg_ocl_context_t *vocp, int slot)
+int vg_ocl_prefix_check(vg_ocl_context_t *vocp, int slot, BIGNUM * pkstart)
 {
 	vg_exec_context_t *vxcp = &vocp->base;
 	vg_context_t *vcp = vocp->base.vxc_vc;
-	vg_test_func_t test_func = vcp->vc_test;
 	uint32_t *ocl_found_out;
 	int found_count;
 	int res = 0;
@@ -1643,23 +1640,39 @@ int vg_ocl_prefix_check(vg_ocl_context_t *vocp, int slot)
     vg_ocl_write_arg_buffer(vocp, slot, A_FOUND, ocl_found_out);
 
 	if (found_count != -1) {
+        EC_KEY * save_key = vxcp->vxc_key;
+        vxcp->vxc_key = EC_KEY_dup(vxcp->vxc_key);
 		found_count = -found_count-1;
 		if (vocp->base.vxc_vc->vc_verbose > 1) printf("\nFound %d candidadtes, check on CPU\n", found_count);
 		/* GPU code claims match, verify with CPU version */
-		int orig_delta = vxcp->vxc_delta;
-                res = 0;
-		
-		BIGNUM * save_pkey = BN_dup(EC_KEY_get0_private_key(vxcp->vxc_key));
-		
+        res = 0;
 		for (int i=0; i<found_count; i++) {
-			vxcp->vxc_delta = orig_delta+ocl_found_out[1+i];
+			BIGNUM * offset = BN_new();
+            BN_set_word(offset, ocl_found_out[1+i]);
+            BN_add(offset, offset, pkstart);
+            vg_set_privkey(offset, vxcp->vxc_key);
 			for (vxcp->vc_combined_compressed=0; vxcp->vc_combined_compressed<2; vxcp->vc_combined_compressed++) {
-				vg_exec_context_calc_address(vxcp);
 				if (vocp->base.vxc_vc->vc_verbose > 1) {printf("check key=");dumpbn(EC_KEY_get0_private_key(vxcp->vxc_key));}
+                
+                const EC_POINT *pubkey = EC_KEY_get0_public_key(vxcp->vxc_key);
+                if (!pubkey) printf("pubkey is NULL!\n");
+                unsigned char eckey_buf[96], hash1[32], hash2[20];
+                int len;
+
+                len = EC_POINT_point2oct(pgroup,
+                             pubkey,
+                             vxcp->vc_combined_compressed ? POINT_CONVERSION_COMPRESSED : POINT_CONVERSION_UNCOMPRESSED,
+                             eckey_buf,
+                             sizeof(eckey_buf),
+                             vxcp->vxc_bnctx);
+                                
+                SHA256(eckey_buf, len, hash1);
+                RIPEMD160(hash1, sizeof(hash1), hash2);
+                memcpy(&vxcp->vxc_binres[1], hash2, 20);
 
 				/* Make sure the GPU produced the expected hash */
-				if (test_func(vxcp)) {
-
+				if (vg_prefix_test(vxcp)) {
+/*
 					char privkey_buf[VG_PROTKEY_MAX_B58];
 					char addr_buf[64];
 					EC_POINT * ppnt = (EC_POINT *) EC_KEY_get0_public_key(vxcp->vxc_key);
@@ -1675,19 +1688,15 @@ int vg_ocl_prefix_check(vg_ocl_context_t *vocp, int slot)
 						vg_encode_privkey(vxcp->vxc_key, vcp->vc_privtype, privkey_buf);
 					}
 					//printf("Address: %s\nPrivkey: %s\n", addr_buf, privkey_buf);
+                    */
 					res = 1;
 				}
 			}
-			vg_set_privkey(save_pkey, vxcp->vxc_key);
 		}
-		vxcp->vxc_delta = 1;
 		if (!res) if (vocp->base.vxc_vc->vc_verbose > 1) printf("CPU check failed :(\n");
-                vg_set_privkey(save_pkey, vxcp->vxc_key);
-		BN_free(save_pkey);
-		vxcp->vxc_delta = orig_delta;
-		
+        EC_KEY_free(vxcp->vxc_key);
+        vxcp->vxc_key = save_key;
 	}
-	vxcp->vxc_delta += (vocp->voc_ocl_cols * vocp->voc_ocl_rows);
 
     free(ocl_found_out);
 
@@ -1696,211 +1705,46 @@ int vg_ocl_prefix_check(vg_ocl_context_t *vocp, int slot)
 
 int vg_ocl_prefix_init(vg_ocl_context_t *vocp)
 {
-	int i;
-
 	if (!vg_ocl_create_kernel(vocp, 2, "fill_bitmap"))
 		return 0;
 
 	if (!vg_ocl_kernel_arg_alloc(vocp, -1, A_FOUND, 2049, 1))
 		return 0;
+	if (!vg_ocl_kernel_arg_alloc(vocp, -1, A_START, 32, 1))
+		return 0;
 	vocp->voc_rekey_func = vg_ocl_prefix_rekey;
-	vocp->voc_check_func = vg_ocl_prefix_check;
 	vocp->voc_pattern_rewrite = 1;
 	vocp->voc_pattern_alloc = 0;
 	return 1;
 }
 
 
-/*
- * Temporary buffer content verification functions
- * This provides a simple test of the kernel, the OpenCL compiler,
- * and the hardware.
- */
-int
-vg_ocl_verify_temporary(vg_ocl_context_t *vocp, int slot, int z_inverted)
-{
-	vg_exec_context_t *vxcp = &vocp->base;
-	unsigned char *point_tmp = NULL, *z_heap = NULL;
-	unsigned char *ocl_points_in = NULL, *ocl_strides_in = NULL;
-	const EC_GROUP *pgroup;
-	EC_POINT *ppr = NULL, *ppc = NULL, *pps = NULL, *ppt = NULL;
-	BIGNUM bnz, bnez, bnm, *bnzc;
-	BN_CTX *bnctx = NULL;
-	BN_MONT_CTX *bnmont;
-	int ret = 0;
-	int mismatches = 0, mm_r;
-	int x, y, bx;
-	static const unsigned char raw_modulus[] = {
-		0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
-		0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
-		0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
-		0xFF,0xFF,0xFF,0xFE,0xFF,0xFF,0xFC,0x2F
-	};
+#define LIMBS(d) get_word(d,0), get_word(d,1), get_word(d,2), get_word(d,3), get_word(d,4), get_word(d,5), get_word(d,6), get_word(d,7)
 
-	BN_init(&bnz);
-	BN_init(&bnez);
-	BN_init(&bnm);
-
-	bnctx = BN_CTX_new();
-	bnmont = BN_MONT_CTX_new();
-	pgroup = EC_KEY_get0_group(vxcp->vxc_key);
-	ppr = EC_POINT_new(pgroup);
-	ppc = EC_POINT_new(pgroup);
-	pps = EC_POINT_new(pgroup);
-	ppt = EC_POINT_new(pgroup);
-
-	if (!bnctx || !bnmont || !ppr || !ppc || !pps || !ppt) {
-		fprintf(stderr, "ERROR: out of memory\n");
-		goto out;
-	}
-
-	BN_bin2bn(raw_modulus, sizeof(raw_modulus), &bnm);
-	BN_MONT_CTX_set(bnmont, &bnm, bnctx);
-
-	if (z_inverted) {
-		bnzc = &bnez;
-	} else {
-		bnzc = &pps->Z;
-	}
-
-	z_heap = (unsigned char *)
-		vg_ocl_map_arg_buffer(vocp, slot, 1, 0);
-	point_tmp = (unsigned char *)
-		vg_ocl_map_arg_buffer(vocp, slot, 2, 0);
-	ocl_points_in = (unsigned char *)
-		vg_ocl_map_arg_buffer(vocp, slot, 3, 0);
-	ocl_strides_in = (unsigned char *)
-		vg_ocl_map_arg_buffer(vocp, slot, 4, 0);
-
-	if (!z_heap || !point_tmp || !ocl_points_in || !ocl_strides_in) {
-		fprintf(stderr, "ERROR: could not map OpenCL point buffers\n");
-		goto out;
-	}
-
-	for (y = 0; y < vocp->voc_ocl_rows; y++) {
-		vg_ocl_get_point(ppr, ocl_strides_in + (64*y));
-		bx = y * vocp->voc_ocl_cols;
-		mm_r = 0;
-
-		for (x = 0; x < vocp->voc_ocl_cols; x++) {
-			vg_ocl_get_point_tpa(ppc, ocl_points_in, x);
-			assert(ppr->Z_is_one && ppc->Z_is_one);
-			EC_POINT_add(pgroup, pps, ppc, ppr, bnctx);
-			assert(!pps->Z_is_one);
-			vg_ocl_get_point_tpa(ppt, point_tmp, bx + x);
-			vg_ocl_get_bignum_tpa(&bnz, z_heap, bx + x);
-			if (z_inverted) {
-				BN_mod_inverse(&bnez, &pps->Z, &bnm, bnctx);
-				BN_to_montgomery(&bnez, &bnez, bnmont, bnctx);
-				BN_to_montgomery(&bnez, &bnez, bnmont, bnctx);
-			}
-			if (BN_cmp(&ppt->X, &pps->X) ||
-			    BN_cmp(&ppt->Y, &pps->Y) ||
-			    BN_cmp(&bnz, bnzc)) {
-				if (!mismatches) {
-					fprintf(stderr, "Base privkey: ");
-					fdumpbn(stderr, EC_KEY_get0_private_key(
-						       vxcp->vxc_key));
-				}
-				mismatches++;
-				fprintf(stderr, "Mismatch for kernel %d, "
-				       "offset %d (%d,%d)\n",
-				       z_inverted, bx + x, y, x);
-				if (!mm_r) {
-					mm_r = 1;
-					fprintf(stderr, "Row X   : ");
-					fdumpbn(stderr, &ppr->X);
-					fprintf(stderr, "Row Y   : ");
-					fdumpbn(stderr, &ppr->Y);
-				}
-
-				fprintf(stderr, "Column X: ");
-				fdumpbn(stderr, &ppc->X);
-				fprintf(stderr, "Column Y: ");
-				fdumpbn(stderr, &ppc->Y);
-
-				if (BN_cmp(&ppt->X, &pps->X)) {
-					fprintf(stderr, "Expect X: ");
-					fdumpbn(stderr, &pps->X);
-					fprintf(stderr, "Device X: ");
-					fdumpbn(stderr, &ppt->X);
-				}
-				if (BN_cmp(&ppt->Y, &pps->Y)) {
-					fprintf(stderr, "Expect Y: ");
-					fdumpbn(stderr, &pps->Y);
-					fprintf(stderr, "Device Y: ");
-					fdumpbn(stderr, &ppt->Y);
-				}
-				if (BN_cmp(&bnz, bnzc)) {
-					fprintf(stderr, "Expect Z: ");
-					fdumpbn(stderr, bnzc);
-					fprintf(stderr, "Device Z: ");
-					fdumpbn(stderr, &bnz);
-				}
-			}
-		}
-	}
-
-	ret = !mismatches;
-
-out:
-	if (z_heap)
-		vg_ocl_unmap_arg_buffer(vocp, slot, 1, z_heap);
-	if (point_tmp)
-		vg_ocl_unmap_arg_buffer(vocp, slot, 2, point_tmp);
-	if (ocl_points_in)
-		vg_ocl_unmap_arg_buffer(vocp, slot, 3, ocl_points_in);
-	if (ocl_strides_in)
-		vg_ocl_unmap_arg_buffer(vocp, slot, 4, ocl_strides_in);
-	if (ppr)
-		EC_POINT_free(ppr);
-	if (ppc)
-		EC_POINT_free(ppc);
-	if (pps)
-		EC_POINT_free(pps);
-	if (ppt)
-		EC_POINT_free(ppt);
-	BN_clear_free(&bnz);
-	BN_clear_free(&bnez);
-	BN_clear_free(&bnm);
-	if (bnmont)
-		BN_MONT_CTX_free(bnmont);
-	if (bnctx)
-		BN_CTX_free(bnctx);
-	return ret;
-}
-
-int
-vg_ocl_verify_k0(vg_ocl_context_t *vocp, int slot)
-{
-	return vg_ocl_verify_temporary(vocp, slot, 0);
-}
-
-int
-vg_ocl_verify_k1(vg_ocl_context_t *vocp, int slot)
-{
-	return vg_ocl_verify_temporary(vocp, slot, 1);
+unsigned get_word(BIGNUM * x, int i) {
+    
+    BIGNUM * y = BN_new();
+    BN_rshift(y, x, i*32);
+    BN_mask_bits(y, 32);
+    unsigned w = BN_get_word(y);
+    BN_free(y);
+    return w;
 }
 
 /*
  * Address search thread main loop
  */
-
 void *
 vg_opencl_loop(vg_exec_context_t *arg)
 {
 	vg_ocl_context_t *vocp = (vg_ocl_context_t *) arg;
-	int i, halt = 0, slot = 0;
-	int round, nrows, ncols;
+	int halt = 0, slot = 0;
+	int round;
 
 	EC_KEY *pkey = NULL;
-	const EC_GROUP *pgroup;
 	const EC_POINT *pgen;
-	EC_POINT **ppbase = NULL, **pprow, *pbatchinc = NULL, *poffset = NULL;
-	EC_POINT *pseek = NULL;
+	EC_POINT *poffset = NULL;
 
-	unsigned char *ocl_points_in, *ocl_strides_in;
-    
 	vg_context_t *vcp = vocp->base.vxc_vc;
 	vg_exec_context_t *vxcp = &vocp->base;
 
@@ -1914,146 +1758,77 @@ vg_opencl_loop(vg_exec_context_t *arg)
 
 	vocp->voc_nslots = 1;
 
-	nrows = vocp->voc_ocl_rows;
-	ncols = vocp->voc_ocl_cols;
-
-	ppbase = (EC_POINT **) malloc((nrows + ncols) *
-				      sizeof(EC_POINT*));
-	if (!ppbase)
-		return NULL;
-
-	for (i = 0; i < (nrows + ncols); i++) {
-		ppbase[i] = EC_POINT_new(pgroup);
-		if (!ppbase[i])
-			return NULL;
-	}
-
-	pprow = ppbase + ncols;
-	pbatchinc = EC_POINT_new(pgroup);
-	poffset = EC_POINT_new(pgroup);
-	pseek = EC_POINT_new(pgroup);
-	if (!pbatchinc || !poffset || !pseek)
-		return NULL;
-
-	BN_set_word(&vxcp->vxc_bntmp, ncols);
-	EC_POINT_mul(pgroup, pbatchinc, &vxcp->vxc_bntmp, NULL, NULL,
-		     vxcp->vxc_bnctx);
-	EC_POINT_make_affine(pgroup, pbatchinc, vxcp->vxc_bnctx);
-
-	BN_set_word(&vxcp->vxc_bntmp, round);
-	EC_POINT_mul(pgroup, poffset, &vxcp->vxc_bntmp, NULL, NULL,
-		     vxcp->vxc_bnctx);
-	EC_POINT_make_affine(pgroup, poffset, vxcp->vxc_bnctx);
-	
 	if (!vg_ocl_prefix_init(vocp))
 		return NULL;
 	
-	if (!vg_ocl_kernel_arg_alloc(vocp, -1, A_COL, 32 * 2 * nrows, 1))
-		return NULL;
-
 	if (!vg_ocl_kernel_arg_alloc(vocp, -1, A_Z_HEAP,
 			     round_up_pow2(32 * 2 * round, 4096), 0) ||
 	    !vg_ocl_kernel_arg_alloc(vocp, -1, A_POINTS,
 			     round_up_pow2(32 * 2 * round, 4096), 0) ||
-	    !vg_ocl_kernel_arg_alloc(vocp, -1, A_ROW,
-			     round_up_pow2(32 * 2 * ncols, 4096), 1))
+	    !vg_ocl_kernel_arg_alloc(vocp, -1, A_INCREMENT, 32 * 2, 1) ||
+	    !vg_ocl_kernel_arg_alloc(vocp, -1, A_START, 32, 1)
+                 )
 		return NULL;
 
+	poffset = EC_POINT_new(pgroup);
+	BN_set_word(&vxcp->vxc_bntmp, round);
+    EC_POINT * igenerator = EC_POINT_dup(pgen, pgroup);
+    EC_POINT_invert(pgroup, igenerator, vxcp->vxc_bnctx);
+	EC_POINT_mul(pgroup, poffset, NULL, igenerator, &vxcp->vxc_bntmp, vxcp->vxc_bnctx);
+	EC_POINT_make_affine(pgroup, poffset, vxcp->vxc_bnctx);
+    unsigned char buf[64];
+    vg_ocl_put_point(buf, poffset);
+    vg_ocl_write_arg_buffer(vocp, 0, A_INCREMENT, buf);
+    
+    {
+        // self-test
+        EC_POINT * pnt = EC_POINT_new(pgroup);
+        EC_POINT_mul(pgroup, pnt, EC_KEY_get0_private_key(pkey), NULL, NULL, vxcp->vxc_bnctx);
+        EC_POINT * pnt1 = EC_POINT_new(pgroup);
+        EC_POINT_add(pgroup, pnt1, pnt, poffset, vxcp->vxc_bnctx); // pnt1 = pnt + poffset
+        BIGNUM * bn_round = BN_new();
+        BN_set_word(bn_round, round);
+        BIGNUM * bn_pkey_round = BN_new();
+        BN_sub(bn_pkey_round, EC_KEY_get0_private_key(pkey), bn_round);
+        EC_POINT * pnt2 = EC_POINT_new(pgroup);
+        // pnt2 = (key-round)*gen
+        EC_POINT_mul(pgroup, pnt2, bn_pkey_round, NULL, NULL, vxcp->vxc_bnctx);
+        
+        assert(!EC_POINT_cmp(pgroup, pnt1, pnt2, vxcp->vxc_bnctx));
+        
+        BIGNUM *x = BN_new(), *y = BN_new();
+        EC_POINT_get_affine_coordinates_GFp(pgroup, poffset, x, y, vxcp->vxc_bnctx);
+        BN_MONT_CTX * mont = BN_MONT_CTX_new();
+        BIGNUM *mod = NULL;
+        if (!BN_hex2bn(&mod, "fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f")) {
+            printf("wrong hex\n");
+            return NULL;
+        }
+        BN_MONT_CTX_set(mont, mod, vxcp->vxc_bnctx);
+        BN_to_montgomery(x,x,mont,vxcp->vxc_bnctx);
+        BN_to_montgomery(y,y,mont,vxcp->vxc_bnctx);
+        //printf("CPU increment(X): %x %x %x %x %x %x %x %x\n", LIMBS(x));
+        //printf("CPU increment(Y): %x %x %x %x %x %x %x %x\n", LIMBS(y));
+
+    }
+    
 	vxcp->vxc_binres[0] = vcp->vc_addrtype;
 
 	gettimeofday(&tvstart, NULL);
         
 	vocp->voc_rekey_func(vocp);
 
-    ocl_points_in = (unsigned char *)malloc(vocp->voc_arg_size[0][A_ROW]);
-    printf("%d/%d\n", vocp->voc_arg_size[0][A_ROW], vocp->voc_arg_size[0][A_COL]);
-    ocl_strides_in = (unsigned char *)malloc(vocp->voc_arg_size[0][A_COL]);
-
 	vg_exec_context_upgrade_lock(vxcp);
 
-#ifdef TRACE
-	{
-		// debug
-		const EC_POINT * pub = EC_KEY_get0_public_key(pkey);
-		printf("pubkey: (");
-		dumpbn(&pub->X);printf(",");
-		dumpbn(&pub->Y);printf(")\n");
-		EC_POINT * p = EC_POINT_new(pgroup);
-		EC_POINT_copy(p, EC_KEY_get0_public_key(pkey));
-		EC_POINT_make_affine(pgroup, p, vxcp->vxc_bnctx);
-		printf("pubkey(aff): (");
-		dumpbn(&p->X);printf(",");
-		dumpbn(&p->Y);printf(")\n");
-		char addr[100];
-		vg_encode_address(p, pgroup, 0, addr);
-		printf("Addr: %s\n", addr);
-		
-	}
-#endif
-	
-	const int niterations = 5;
-	
-	while (1) {
-	// key -= round*niterations
-	BN_set_word(&vxcp->vxc_bntmp, round*niterations);
-	BN_sub(&vxcp->vxc_bntmp2,
-	       EC_KEY_get0_private_key(pkey),
-	       &vxcp->vxc_bntmp);
-	vg_set_privkey(&vxcp->vxc_bntmp2, pkey);
-	EC_POINT_copy(ppbase[0], EC_KEY_get0_public_key(pkey));
-
-	/* Build the base array of sequential points */
-	for (i = 1; i < ncols; i++) {
-		EC_POINT_add(pgroup,
-			     ppbase[i],
-			     ppbase[i-1],
-			     pgen, vxcp->vxc_bnctx);
-	}
-	
-	EC_POINTs_make_affine(pgroup, ncols, ppbase, vxcp->vxc_bnctx);
-	
-	for (i = 0; i < ncols; i++) {
-		if (EC_POINT_is_at_infinity(pgroup, ppbase[i])) {
-			printf("Infinity at %d\n", i);
-			break;
-		}
-		int ret = EC_POINT_is_on_curve(pgroup, ppbase[i], vxcp->vxc_bnctx);
-		if (!ret) {
-			printf("Not on curve at %d: ret=%d\n", i, ret);
-			break;
-		}
-	}
-
-	/* Fill the sequential point array */
-	if (vcp->vc_verbose > 1) printf("\nCopy %d sequential points to the device", ncols);
-	for (i = 0; i < ncols; i++)
-		vg_ocl_put_point_tpa(ocl_points_in, i, ppbase[i]);
-	vg_ocl_write_arg_buffer(vocp, 0, A_ROW, ocl_points_in);
-
-	/*
-	 * Set up the initial row increment table.
-	 * Set the first element to pgen -- effectively
-	 * skipping the exact key generated above.
-	 */
-	EC_POINT_copy(pprow[0], pgen);
-	for (i = 1; i < nrows; i++) {
-		EC_POINT_add(pgroup,
-			     pprow[i],
-			     pprow[i-1],
-			     pbatchinc, vxcp->vxc_bnctx);
-	}
-	EC_POINTs_make_affine(pgroup, nrows, pprow, vxcp->vxc_bnctx);
-	
-	/* Copy the row stride array to the device */
-	if (vcp->vc_verbose > 1) printf("\nCopy the row stride array to the device");
-	memset(ocl_strides_in, 0, 64*nrows);
-	for (i = 0; i < nrows; i++)
-		vg_ocl_put_point(ocl_strides_in + (64*i), pprow[i]);
-	vg_ocl_write_arg_buffer(vocp, slot, A_COL, ocl_strides_in);
-
-	vxcp->vxc_delta = 1;
-
-	for (int iter = 0; iter<niterations; iter++) {
+	for (int iteration=0; ; iteration++) {
+        // key -= round
+        BN_set_word(&vxcp->vxc_bntmp, round);
+        BN_sub(&vxcp->vxc_bntmp2,
+               EC_KEY_get0_private_key(pkey),
+               &vxcp->vxc_bntmp);
+        EC_KEY_set_private_key(pkey, &vxcp->vxc_bntmp2);
+        //vg_set_privkey(&vxcp->vxc_bntmp2, pkey);
+        
 		if (vcp->vc_halt)
 			halt = 1;
 		if (halt)
@@ -2061,31 +1836,16 @@ vg_opencl_loop(vg_exec_context_t *arg)
 
 		gettimeofday(&tv, NULL);
 		
-		if (!vg_ocl_kernel_start(vocp, 0, ncols, nrows, vocp->voc_ocl_invsize))
+		if (!vg_ocl_kernel_start(vocp, 0, round, vocp->voc_ocl_invsize, &vxcp->vxc_bntmp2, iteration==0))
 			halt = 1;
-
-		if (vcp->vc_verbose > 1) printf("\nMove the row increments forward");
-		for (i = 0; i < ncols; i++) {
-			EC_POINT_add(pgroup,
-				     ppbase[i],
-				     ppbase[i],
-				     poffset,
-				     vxcp->vxc_bnctx);
-		}
-		EC_POINTs_make_affine(pgroup, ncols, ppbase, vxcp->vxc_bnctx);
         
-		if (vcp->vc_verbose > 1) printf("\nCopy %d sequential points to the device", ncols);
-		for (i = 0; i < ncols; i++)
-			vg_ocl_put_point_tpa(ocl_points_in, i, ppbase[i]);
-		vg_ocl_write_arg_buffer(vocp, 0, A_ROW, ocl_points_in);
-		
 		// Wait for the GPU to complete its job
 		if (vcp->vc_verbose > 1) printf("\nWait for the GPU to complete its job");
 		if (!vg_ocl_kernel_wait(vocp, slot))
 			halt = 1;
 		
 		/* Call the result check function */
-		switch (vocp->voc_check_func(vocp, 0)) {
+		switch (vg_ocl_prefix_check(vocp, 0, &vxcp->vxc_bntmp2)) {
 		case 1:
 			break;
 		case 2:
@@ -2098,20 +1858,18 @@ vg_opencl_loop(vg_exec_context_t *arg)
 		vg_output_timing(vcp, round, &tvstart);
 		//vg_exec_context_yield(vxcp);
 
-	}
-	
-	if (vcp->vc_verbose > 1) printf("\nsave the priv. key to a file");
-	if (save_file_name) {
-		//vg_encode_privkey(vxcp->vxc_key, vcp->vc_privtype, privkey_buf);
-		FILE *sf = fopen(save_file_name, "w");
-		if (sf) {
-			char *privkey_buf = BN_bn2hex(EC_KEY_get0_private_key(vxcp->vxc_key));
-			fputs(privkey_buf, sf);
-			fputs("\n", sf);
-			fclose(sf);
-			OPENSSL_free(privkey_buf);
-		}
-	}
+	    if (vcp->vc_verbose > 1) printf("\nsave the priv. key to a file");
+        if (save_file_name && (iteration+1)%10 == 0) {
+            //vg_encode_privkey(vxcp->vxc_key, vcp->vc_privtype, privkey_buf);
+            FILE *sf = fopen(save_file_name, "w");
+            if (sf) {
+                char *privkey_buf = BN_bn2hex(EC_KEY_get0_private_key(vxcp->vxc_key));
+                fputs(privkey_buf, sf);
+                fputs("\n", sf);
+                fclose(sf);
+                OPENSSL_free(privkey_buf);
+            }
+        }
 	}
 
 	if (halt) {
@@ -2123,14 +1881,8 @@ vg_opencl_loop(vg_exec_context_t *arg)
 
 	vg_exec_context_yield(vxcp);
 
-	if (ppbase) {
-		for (i = 0; i < (nrows + ncols); i++)
-			if (ppbase[i])
-				EC_POINT_free(ppbase[i]);
-		free(ppbase);
-	}
-	if (pbatchinc)
-		EC_POINT_free(pbatchinc);
+	if (poffset)
+		EC_POINT_free(poffset);
 
 	/* Release the argument buffers */
 	vg_ocl_free_args(vocp);
@@ -2396,17 +2148,6 @@ vg_ocl_context_new(vg_context_t *vcp,
 		return NULL;
 	}
 
-	if (verify) {
-		if (vcp->vc_verbose > 0) {
-			fprintf(stderr, "WARNING: "
-				"Hardware verification mode enabled\n");
-		}
-		if (!nthreads)
-			nthreads = 1;
-		vocp->voc_verify_func[0] = vg_ocl_verify_k0;
-		vocp->voc_verify_func[1] = vg_ocl_verify_k1;
-	}
-
 	/*
 	 * nrows: number of point rows per job
 	 * ncols: number of point columns per job
@@ -2465,7 +2206,7 @@ vg_ocl_context_new(vg_context_t *vcp,
 	memsize = vg_ocl_device_getulong(vocp->voc_ocldid, CL_DEVICE_GLOBAL_MEM_SIZE);
 	allocsize = vg_ocl_device_getulong(vocp->voc_ocldid, CL_DEVICE_MAX_MEM_ALLOC_SIZE);
 	
-	if (vcp->vc_verbose>1) printf("allocsize=%lld, memsize=%lld\n", allocsize, memsize);
+	if (vcp->vc_verbose>1) printf("allocsize=%ld, memsize=%ld\n", allocsize, memsize);
 	
 	if (!ncols) {
 		bitmapsize = min(allocsize, memsize/2);
@@ -2510,7 +2251,7 @@ vg_ocl_context_new(vg_context_t *vcp,
 		fprintf(stderr, "Grid size: %dx%d\n", ncols, nrows);
 		fprintf(stderr, "Modular inverse: %d threads, %d ops each\n",
 			round/invsize, invsize);
-		fprintf(stderr, "Bitmap size (bytes): %lld\n", bitmapsize);
+		fprintf(stderr, "Bitmap size (bytes): %ld\n", bitmapsize);
 	}
 
 	if ((round % invsize) || !is_pow2(invsize) || (invsize < 2)) {
