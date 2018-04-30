@@ -3749,8 +3749,13 @@ int compute_and_test_address(bignum * zi, __global bn_word * xy, __global uchar 
 	}
 #endif
 	int found = 0;
-	
+    
+#ifdef COMPRESSED_ONLY	
+    const int compressed_address = 1;
+    {
+#else
 	for (int compressed_address=1; compressed_address>=0; compressed_address--) {
+#endif
 		wh = (compressed_address ? 0x02 : 0x04);
 #define hash_ec_point_inner_3(i)		\
 		wl = wh;				\
