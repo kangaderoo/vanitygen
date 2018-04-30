@@ -34,6 +34,7 @@ const char *version = VANITYGEN_VERSION;
 const int debug = 0;
 
 char * save_file_name = NULL;
+int compressed_only = 0;
 
 void
 usage(const char *name)
@@ -49,6 +50,7 @@ usage(const char *name)
 "-e            Encrypt private keys, prompt for password\n"
 "-E <password> Encrypt private keys with <password> (UNSAFE)\n"
 "-p <platform> Select OpenCL platform\n"
+"-C            Check compressed addresses only\n"
 "-d <device>   Select OpenCL device\n"
 "-D <devstr>   Use OpenCL device, identified by device string\n"
 "              Form: <platform>:<devicenumber>[,<options>]\n"
@@ -110,7 +112,7 @@ main(int argc, char **argv)
 	int i;
 
 	while ((opt = getopt(argc, argv,
-			     "vq1eE:p:P:d:w:t:g:b:VSh?f:o:s:D:k:")) != -1) {
+			     "vq1eE:p:P:d:w:t:g:b:VSh?f:o:s:D:k:C")) != -1) {
 		switch (opt) {
 		case 'o':
 			if (result_file) {
@@ -246,6 +248,9 @@ main(int argc, char **argv)
 		case 'k':
 			save_file_name = optarg;
 			break;
+        case 'C':
+            compressed_only = 1;
+            break;
 		default:
 			usage(argv[0]);
 			return 1;

@@ -51,7 +51,7 @@
 
 void vg_ocl_free_args(vg_ocl_context_t *vocp);
 void *vg_opencl_loop(vg_exec_context_t *arg);
-
+extern int compressed_only;
 
 /* OpenCL address searching mode */
 struct _vg_ocl_context_s;
@@ -944,6 +944,9 @@ vg_ocl_init(vg_context_t *vcp, vg_ocl_context_t *vocp, cl_device_id did,
 		end += snprintf(optbuf + end, sizeof(optbuf) - end,
 				"-cl-nv-verbose -cl-nv-maxrregcount=85 ");
 	end += snprintf(optbuf + end, sizeof(optbuf) - end, "-DLOCAL_MEM_SIZE=%ld ", localmemsize-16);
+    if (compressed_only) {
+        end += snprintf(optbuf + end, sizeof(optbuf) - end, "-DCOMPRESSED_ONLY ");
+    }
 
 	if (!vg_ocl_load_program(vcp, vocp, "calc_addrs.cl", optbuf))
 		return 0;
