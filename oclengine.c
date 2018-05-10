@@ -1966,8 +1966,6 @@ vg_opencl_loop(vg_exec_context_t *arg)
 
 	gettimeofday(&tvstart, NULL);
         
-	vocp->voc_rekey_func(vocp);
-
     ocl_points_in = (unsigned char *)malloc(vocp->voc_arg_size[0][A_ROW]);
     printf("%d/%d\n", vocp->voc_arg_size[0][A_ROW], vocp->voc_arg_size[0][A_COL]);
     ocl_strides_in = (unsigned char *)malloc(vocp->voc_arg_size[0][A_COL]);
@@ -2004,6 +2002,8 @@ vg_opencl_loop(vg_exec_context_t *arg)
 	       &vxcp->vxc_bntmp);
 	vg_set_privkey(&vxcp->vxc_bntmp2, pkey);
 	EC_POINT_copy(ppbase[0], EC_KEY_get0_public_key(pkey));
+
+	vocp->voc_rekey_func(vocp);
 
 	/* Build the base array of sequential points */
 	for (i = 1; i < ncols; i++) {
