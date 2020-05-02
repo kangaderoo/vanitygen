@@ -60,10 +60,10 @@ struct _vg_exec_context_s {
 	int				vxc_delta;
     int         vc_combined_compressed;
 	unsigned char			vxc_binres[28];
-	BIGNUM				vxc_bntarg;
-	BIGNUM				vxc_bnbase;
-	BIGNUM				vxc_bntmp;
-	BIGNUM				vxc_bntmp2;
+	BIGNUM				*vxc_bntarg;
+	BIGNUM				*vxc_bnbase;
+	BIGNUM				*vxc_bntmp;
+	BIGNUM				*vxc_bntmp2;
 
 	vg_exec_context_threadfunc_t	vxc_threadfunc;
 	pthread_t			vxc_pthread;
