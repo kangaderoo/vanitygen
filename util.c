@@ -293,27 +293,30 @@ vg_encode_address_compressed(const EC_POINT *ppoint, const EC_GROUP *pgroup,
 
 void
 vg_encode_script_address(const EC_POINT *ppoint, const EC_GROUP *pgroup,
-			 int addrtype, char *result)
+			 int addrtype, int compressed, char *result)
 {
+	int hash_len;
+	hash_len = compressed? 33: 65;
+
 	unsigned char script_buf[69];
 	unsigned char *eckey_buf = script_buf + 2;
 	unsigned char binres[21] = {0,};
 	unsigned char hash1[32];
 
 	script_buf[ 0] = 0x51;  // OP_1
-	script_buf[ 1] = 0x41;  // pubkey length
+	script_buf[ 1] = hash_len; // 0x41;  // pubkey length
 	// gap for pubkey
-	script_buf[67] = 0x51;  // OP_1
-	script_buf[68] = 0xae;  // OP_CHECKMULTISIG
+	script_buf[hash_len+2] = 0x51;  // OP_1
+	script_buf[hash_len+3] = 0xae;  // OP_CHECKMULTISIG
 
 	EC_POINT_point2oct(pgroup,
 			   ppoint,
-			   POINT_CONVERSION_UNCOMPRESSED,
+			   compressed? POINT_CONVERSION_COMPRESSED: POINT_CONVERSION_UNCOMPRESSED,
 			   eckey_buf,
-			   65,
+			   hash_len,
 			   NULL);
 	binres[0] = addrtype;
-	SHA256(script_buf, 69, hash1);
+	SHA256(script_buf, hash_len+4, hash1);
 	RIPEMD160(hash1, sizeof(hash1), &binres[1]);
 
 	vg_b58_encode_check(binres, sizeof(binres), result);

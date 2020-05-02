@@ -70,7 +70,7 @@ vg_thread_loop(void *arg)
 
 	int i, j, c, len, output_interval;
 	int hash_len;
-	const step = 4;
+	const int step = 4;
 
 	const BN_ULONG rekey_max = 10000000;
 	BN_ULONG npoints, rekey_at, nbatch;
@@ -140,18 +140,20 @@ vg_thread_loop(void *arg)
 	gettimeofday(&tvstart, NULL);
 
 	if (vcp->vc_format == VCF_SCRIPT) {
-		//hash_len = (vcp->vc_compressed)?37:69;
-		hash_len = 69;
+		hash_len = (vcp->vc_compressed)? 33: 65;
+//		hash_len = 69;
 		for (j=0;j<4;j++){
 			hash_buf[ 0+j*128] = 0x51;  // OP_1
-			hash_buf[ 1+j*128] = 0x41;  // pubkey length
+			hash_buf[ 1+j*128] = hash_len;  //0x41;  // pubkey length
 			// gap for pubkey
-			hash_buf[(hash_len-2)+j*128] = 0x51;  // OP_1
-			hash_buf[(hash_len-1)+j*128] = 0xae;  // OP_CHECKMULTISIG
+			// ToDo: gap for compressed pubkey
+			// ToDo: setup this part for multisign.
+			hash_buf[(hash_len+2)+j*128] = 0x51;  // OP_1
+			hash_buf[(hash_len+3)+j*128] = 0xae;  // OP_CHECKMULTISIG
 		}
 		eckey_buf = hash_buf + 2;
-		hash_len = 69;
-
+		// offset is added later
+		// hash_len = 69;
 	} else {
 		eckey_buf = hash_buf;
 		switch(vcp->vc_compressed){
@@ -256,30 +258,30 @@ vg_thread_loop(void *arg)
 			for (j=0; j< step;j++){
 				switch (vcp->vc_compressed){
 					case UNCOMPRESSED:
-							/* Hash the public key */
-							// BN_bn2bin()
-							// this function does perform a affine check/modify that cannot be bypassed, it is rewritten to
-							// a simpler form., just get the jacobian X and Y, since the group-affine put Z equal 1.
-							// convert the BigNum to octal stream.
-							// Compressed is determined by Y, compressed 02->Y=even 03->Y=odd; 04->uncompressed
-							len = struct_EC_POINT_point2oct(pgroup, ppnt[i+j],
-			//    			len = EC_POINT_point2oct(pgroup, ppnt[i+j],
-										 POINT_CONVERSION_UNCOMPRESSED,
-										 eckey_buf+(j*128),
-										 65,
-										 vxcp->vxc_bnctx);
+						/* Hash the public key */
+						// BN_bn2bin()
+						// this function does perform a affine check/modify that cannot be bypassed, it is rewritten to
+						// a simpler form., just get the jacobian X and Y, since the group-affine put Z equal 1.
+						// convert the BigNum to octal stream.
+						// Compressed is determined by Y, compressed 02->Y=even 03->Y=odd; 04->uncompressed
+						len = struct_EC_POINT_point2oct(pgroup, ppnt[i+j],
+		//    			len = EC_POINT_point2oct(pgroup, ppnt[i+j],
+									 POINT_CONVERSION_UNCOMPRESSED,
+									 eckey_buf+(j*128),
+									 65,
+									 vxcp->vxc_bnctx);
 
-							vxcp->vxc_delta++;
+						vxcp->vxc_delta++;
 						hash_len = 65;
 						break;
 					case COMPRESSED:
-							len = struct_EC_POINT_point2oct(pgroup, ppnt[i+j],
-										 POINT_CONVERSION_COMPRESSED,
-										 eckey_buf+(j*128),
-										 33,
-										 vxcp->vxc_bnctx);
+						len = struct_EC_POINT_point2oct(pgroup, ppnt[i+j],
+									 POINT_CONVERSION_COMPRESSED,
+									 eckey_buf+(j*128),
+									 33,
+									 vxcp->vxc_bnctx);
 
-							vxcp->vxc_delta++;
+						vxcp->vxc_delta++;
 						hash_len = 33;
 						break;
 					case COMBINED:
@@ -305,7 +307,11 @@ vg_thread_loop(void *arg)
 						}
 						break;
 					}
+				if (vcp->vc_format == VCF_SCRIPT){
+					hash_len=hash_len+4;
 				}
+
+			}
 
 #ifndef AVX1SUPPORT
 			for (j=0; j< step;j++){
@@ -497,7 +503,7 @@ usage(const char *name)
 "-T            Generate bitcoin testnet address\n"
 "-X <version>  Generate address with the given version\n"
 "-p <privtyp>  The priv-type belonging to the version, default <version>+128\n"
-"-F <format>   Generate address with the given format (pubkey, compressed, combined, script)\n"
+"-F <format>   Generate address with the given format (pubkey, compressed, combined, script, scriptcompressed)\n"
 "-P <pubkey>   Specify base public key for piecewise key generation\n"
 "-e            Encrypt private keys, prompt for password\n"
 "-E <password> Encrypt private keys with <password> (UNSAFE)\n"
@@ -596,8 +602,14 @@ main(int argc, char **argv)
 			privtypeoverride = 1;
 			break;
 		case 'F':
-			if (!strcmp(optarg, "script"))
+			if (!strcmp(optarg, "scriptcompressed")){
 				format = VCF_SCRIPT;
+				compressed = 1;
+			}
+			else if (!strcmp(optarg, "script")){
+				format = VCF_SCRIPT;
+				compressed = 0;
+			}
             else
               if (!strcmp(optarg, "compressed"))
                  compressed = 1;
