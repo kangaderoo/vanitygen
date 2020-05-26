@@ -38,6 +38,7 @@
 
 #include "pattern.h"
 #include "util.h"
+#include "segwit_addr.h"
 
 const char *vg_b58_alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
@@ -295,8 +296,8 @@ void
 vg_encode_script_address(const EC_POINT *ppoint, const EC_GROUP *pgroup,
 			 int addrtype, int compressed, char *result)
 {
-	int hash_len;
-	hash_len = compressed? 33: 65;
+	int key_len;
+	key_len = compressed? 33: 65;
 
 	unsigned char script_buf[69];
 	unsigned char *eckey_buf = script_buf + 2;
@@ -304,23 +305,123 @@ vg_encode_script_address(const EC_POINT *ppoint, const EC_GROUP *pgroup,
 	unsigned char hash1[32];
 
 	script_buf[ 0] = 0x51;  // OP_1
-	script_buf[ 1] = hash_len; // 0x41;  // pubkey length
+	script_buf[ 1] = key_len; // 0x41;  // pubkey length
 	// gap for pubkey
-	script_buf[hash_len+2] = 0x51;  // OP_1
-	script_buf[hash_len+3] = 0xae;  // OP_CHECKMULTISIG
+	script_buf[key_len+2] = 0x51;  // OP_1
+	script_buf[key_len+3] = 0xae;  // OP_CHECKMULTISIG
 
 	EC_POINT_point2oct(pgroup,
 			   ppoint,
 			   compressed? POINT_CONVERSION_COMPRESSED: POINT_CONVERSION_UNCOMPRESSED,
 			   eckey_buf,
-			   hash_len,
+			   key_len,
 			   NULL);
+
 	binres[0] = addrtype;
-	SHA256(script_buf, hash_len+4, hash1);
+	SHA256(script_buf, key_len+4, hash1);
 	RIPEMD160(hash1, sizeof(hash1), &binres[1]);
 
 	vg_b58_encode_check(binres, sizeof(binres), result);
 }
+
+void
+vg_encode_multiscript_address (const EC_POINT *ppoint, const EC_GROUP *pgroup,
+			 int addrtype, int compressed, char *result,
+			 int prehashlen, int nrsignkeys, int nrkeys, char* script)
+{
+	int key_len;
+	key_len = compressed? 33: 65;
+	int loc,len,i;
+	unsigned char script_buf[69+prehashlen];
+	unsigned char *eckey_buf = script_buf + prehashlen + 1;
+	unsigned char binres[21] = {0,};
+	unsigned char hash1[32];
+
+	memcpy(&script_buf, script, prehashlen);
+
+	script_buf[ 0] = (uint8_t)nrsignkeys + 0x50;
+	script_buf[ prehashlen] = key_len; // 0x41;  // pubkey length
+	// gap for pubkey
+	script_buf[prehashlen + key_len+ 1] = (uint8_t)nrkeys+0x50+1;  // OP_1
+	script_buf[prehashlen + key_len+ 2] = 0xae;  // OP_CHECKMULTISIG
+
+	EC_POINT_point2oct(pgroup,
+			   ppoint,
+			   compressed? POINT_CONVERSION_COMPRESSED: POINT_CONVERSION_UNCOMPRESSED,
+			   eckey_buf,
+			   key_len,
+			   NULL);
+
+//		fprintf(stderr, "\nP2SH Keys (hex):");
+//		loc = 2;
+//		for(i=0;i<nrkeys+1;i++){
+//			len = script_buf[loc-1];
+//			fprintf(stderr,"\nKey%d:\n\t", i);
+//			fdumphex(stderr,&script_buf[loc],len);
+//			loc = loc + len + 1;
+//		}
+//		fprintf(stderr,"\n");
+//		fflush(stderr);
+	binres[0] = addrtype;
+	SHA256(script_buf, prehashlen+key_len+3, hash1);
+	RIPEMD160(hash1, sizeof(hash1), &binres[1]);
+	vg_b58_encode_check(binres, sizeof(binres), result);
+}
+
+
+void
+vg_encode_p2sh(unsigned char *redeemscript, int lenght, int addrtype, char *result)
+{
+	unsigned char binres[21] = {0,};
+	unsigned char hash1[32];
+
+	binres[0] = addrtype;
+	SHA256(redeemscript, lenght, hash1);
+	RIPEMD160(hash1, sizeof(hash1), &binres[1]);
+
+	vg_b58_encode_check(binres, sizeof(binres), result);
+}
+
+
+
+void
+vg_encode_script_address_segwit(const EC_POINT *ppoint, const EC_GROUP *pgroup,
+			 int addrtype, int compressed, char *result)
+{
+	int key_len;
+	key_len = compressed? 33: 65;
+
+	unsigned char script_buf[69];
+//	unsigned char *eckey_buf = script_buf + 2;
+	unsigned char segwit_buf[22] = {0,0x14,};
+	unsigned char binres[21] = {0,};
+	unsigned char hash1[32];
+
+//  ToDo: still need to find out what to do here :-)
+//	script_buf[ 0] = 0x51;  // OP_1
+//	script_buf[ 1] = key_len; // 0x41;  // pubkey length
+	// gap for pubkey
+//	script_buf[key_len+2] = 0x51;  // OP_1
+//	script_buf[key_len+3] = 0xae;  // OP_CHECKMULTISIG
+
+	EC_POINT_point2oct(pgroup,
+			   ppoint,
+			   compressed? POINT_CONVERSION_COMPRESSED: POINT_CONVERSION_UNCOMPRESSED,
+			   script_buf,
+//			   eckey_buf,
+			   key_len,
+			   NULL);
+
+	SHA256(script_buf, key_len/*+4*/, hash1);
+	RIPEMD160(hash1, sizeof(hash1), &segwit_buf[2]);
+
+	binres[0] = addrtype;
+	SHA256(segwit_buf, 20+2, hash1);
+	RIPEMD160(hash1, sizeof(hash1), &binres[1]);
+
+	vg_b58_encode_check(binres, sizeof(binres), result);
+}
+
 
 void
 vg_encode_privkey(const EC_KEY *pkey, int addrtype, char *result)

@@ -28,6 +28,7 @@
 #include <openssl/sha.h>
 #include <openssl/ripemd.h>
 #include <openssl/ec.h>
+#include <openssl/obj_mac.h>
 #include <openssl/bn.h>
 #include <openssl/rand.h>
 
@@ -35,6 +36,7 @@
 #include "util.h"
 #include "rmd160.h"
 #include "sha256.h"
+#include "json.h"
 
 #include <immintrin.h>
 #include <string.h>
@@ -42,6 +44,7 @@
 #include <inttypes.h>
 
 #include "custom_ec_bn.h"
+#include "sysendian.h"
 
 const char *version = VANITYGEN_VERSION;
 
@@ -63,13 +66,18 @@ vg_thread_loop(void *arg)
 	// keep the size 128, in order to maintain the SHA256 512 bits per chunk
 	uint32_t *sha256lenPtr = (uint32_t *)&hash_buf;
 	unsigned char *eckey_buf;
+	unsigned char *hash_data;
+	unsigned char *prehash_data;
+	unsigned char prehash[32*4]					__attribute__((aligned(16)));
 	unsigned char hash1[32*4] 					__attribute__((aligned(16)));
 //	unsigned char hash2[32*4] 					__attribute__((aligned(16)));
 //	unsigned char hash1_transpose[32*4] 		__attribute__((aligned(16)));
     unsigned char hash2_transpose[32*4] 		__attribute__((aligned(16)));
+    unsigned char prehash_buf[64];
 
 	int i, j, c, len, output_interval;
-	int hash_len;
+	int hash_len, key_len;
+	int hash_offset = 0;
 	const int step = 4;
 
 	const BN_ULONG rekey_max = 10000000;
@@ -100,6 +108,7 @@ vg_thread_loop(void *arg)
 //	MM_clear_mem(&hash_buf_transpose, 32*4);
 
 	memset(&hash_buf,           0, 4*128);
+	memset(&prehash,            0, 4*128);
 	memset(&hash_buf_transpose, 0, 4*128);
 	memset(&hash2_transpose,    0 ,4*32); // if this dummy is not here and init to zero. a segmentation fault occurs.
 
@@ -139,36 +148,70 @@ vg_thread_loop(void *arg)
 	output_interval = 1000;
 	gettimeofday(&tvstart, NULL);
 
-	if (vcp->vc_format == VCF_SCRIPT) {
-		hash_len = (vcp->vc_compressed)? 33: 65;
-//		hash_len = 69;
+	//new start point for the data, this can shift in case of multisig key and segwit.
+
+	hash_data = hash_buf;
+	prehash_data = prehash;
+	switch(vcp->vc_compressed){
+		case UNCOMPRESSED:
+			key_len = 65;
+			break;
+		case COMPRESSED:
+			key_len = 33;
+			break;
+		case COMBINED:
+			key_len = 65;
+			vxcp->vc_combined_compressed = 0; // starting uncompressed
+			break;
+	}
+	sha256_init(&prehash);
+	// from this point only one more key is added.
+	eckey_buf = hash_data;
+	if (vcp->vc_format == VCF_SCRIPT && vcp->vc_multisignhashlen !=0) {
+		hash_offset = 0;
+		vcp->vc_p2shbuf[0]=(unsigned char)vcp->vc_signkeys + 0x50;
+
+		while (vcp->vc_multisignhashlen - hash_offset > 64){
+ 		// ToDo: change the endian of the uint32_t
+		uint32_t *prehashptr = prehash_buf;
+		for(j=0;j<16;j++){
+				prehashptr[j] = be32dec(vcp->vc_p2shbuf+j*4);
+			}
+			sha256_transform(&prehash, prehash_buf);
+			hash_offset += 64;
+		}
+
+		for (j=1;j<4;j++){
+			memcpy(prehash_data+j*32, prehash_data,32);
+		}
+		eckey_buf = hash_data + (vcp->vc_multisignhashlen-hash_offset+1);
+
+		if (hash_offset < vcp->vc_multisignhashlen){
+			for (j=0;j<4;j++){
+				memcpy(hash_data+j*128, vcp->vc_p2shbuf+hash_offset, vcp->vc_multisignhashlen-hash_offset);
+				hash_data[vcp->vc_multisignhashlen-hash_offset + j*128] = key_len;
+				eckey_buf[key_len+j*128] = vcp->vc_nrkeys + 0x50 + 1;
+				eckey_buf[key_len+1+j*128] = 0xae;
+			}
+		}
+	}else{
+		for (j=1;j<4;j++){
+			memcpy(prehash_data+j*32, prehash_data,32);
+		}
+	}
+
+	if (vcp->vc_format == VCF_SCRIPT && vcp->vc_multisignhashlen ==0) {
+		/* prehash if multisignature p2sh script */
+
 		for (j=0;j<4;j++){
-			hash_buf[ 0+j*128] = 0x51;  // OP_1
-			hash_buf[ 1+j*128] = hash_len;  //0x41;  // pubkey length
+			hash_data[ 0+j*128] = vcp->vc_signkeys + 0x50; // 0x51;  // OP_1
+			hash_data[ 1+j*128] = key_len;  //0x41;  // pubkey length
 			// gap for pubkey
-			// ToDo: gap for compressed pubkey
 			// ToDo: setup this part for multisign.
-			hash_buf[(hash_len+2)+j*128] = 0x51;  // OP_1
-			hash_buf[(hash_len+3)+j*128] = 0xae;  // OP_CHECKMULTISIG
+			hash_data[(key_len+2)+j*128] = vcp->vc_signkeys + 0x50; // 0x51;  // OP_1
+			hash_data[(key_len+3)+j*128] = 0xae;  // OP_CHECKMULTISIG
 		}
-		eckey_buf = hash_buf + 2;
-		// offset is added later
-		// hash_len = 69;
-	} else {
-		eckey_buf = hash_buf;
-		switch(vcp->vc_compressed){
-			case UNCOMPRESSED:
-				hash_len = 65;
-				break;
-			case COMPRESSED:
-				hash_len = 33;
-				break;
-			case COMBINED:
-				hash_len = 65;
-				vxcp->vc_combined_compressed = 0; // starting uncompressed
-				break;
-		}
-//		hash_len = (vcp->vc_compressed)?33:65;
+		eckey_buf = hash_data + 2;
 	}
 
 	while (!vcp->vc_halt) {
@@ -247,14 +290,40 @@ vg_thread_loop(void *arg)
 		 */
 		EC_POINTs_make_affine(pgroup, nbatch, ppnt, vxcp->vxc_bnctx);
 
-		if (vcp->vc_compressed == COMBINED)
+		if (vcp->vc_compressed == COMBINED){
 			nbatch = nbatch * 2;
-
+			if (vcp->vc_format == VCF_SCRIPT) {
+				key_len = 65;  // start uncompressed
+				for (j=0;j<4;j++){
+					hash_data[ 0+j*128] = 0x51;  // OP_1
+					hash_data[ 1+j*128] = key_len;  //0x41;  // pubkey length
+					// gap for pubkey
+					// ToDo: setup this part for multisign.
+					hash_data[(key_len+2)+j*128] = 0x51;  // OP_1
+					hash_data[(key_len+3)+j*128] = 0xae;  // OP_CHECKMULTISIG
+				}
+				eckey_buf = hash_data + 2;
+			}
+		}
 		for (i = 0; i < nbatch; i=i+step) {
 			if (i==nbatch/2 && vcp->vc_compressed == COMBINED){
 				vxcp->vxc_delta = vxcp->vxc_delta - i;
 				memset(&hash_buf, 0, 512);
+				if (vcp->vc_format == VCF_SCRIPT){
+					key_len = 33;
+					for (j=0;j<4;j++){
+						hash_data[ 0+j*128] = 0x51;            // OP_1
+						hash_data[ 1+j*128] = hash_len;        //0x41;  // pubkey length
+						// gap for pubkey
+						// ToDo: setup this part for multisign.
+						hash_data[(hash_len+2)+j*128] = 0x51;  // OP_1
+						hash_data[(hash_len+3)+j*128] = 0xae;  // OP_CHECKMULTISIG
+					}
+					eckey_buf = hash_data + 2;
+				}
 			}
+
+
 			for (j=0; j< step;j++){
 				switch (vcp->vc_compressed){
 					case UNCOMPRESSED:
@@ -264,70 +333,84 @@ vg_thread_loop(void *arg)
 						// a simpler form., just get the jacobian X and Y, since the group-affine put Z equal 1.
 						// convert the BigNum to octal stream.
 						// Compressed is determined by Y, compressed 02->Y=even 03->Y=odd; 04->uncompressed
+						key_len = 65;
 						len = struct_EC_POINT_point2oct(pgroup, ppnt[i+j],
-		//    			len = EC_POINT_point2oct(pgroup, ppnt[i+j],
 									 POINT_CONVERSION_UNCOMPRESSED,
 									 eckey_buf+(j*128),
-									 65,
+									 key_len,
 									 vxcp->vxc_bnctx);
 
 						vxcp->vxc_delta++;
-						hash_len = 65;
 						break;
 					case COMPRESSED:
+						hash_len = 33;
 						len = struct_EC_POINT_point2oct(pgroup, ppnt[i+j],
 									 POINT_CONVERSION_COMPRESSED,
 									 eckey_buf+(j*128),
-									 33,
+									 key_len,
 									 vxcp->vxc_bnctx);
 
 						vxcp->vxc_delta++;
-						hash_len = 33;
 						break;
 					case COMBINED:
 						if (i < ptarraysize){
+							key_len = 65;
 							len = struct_EC_POINT_point2oct(pgroup, ppnt[i+j],
 										 POINT_CONVERSION_UNCOMPRESSED,
 										 eckey_buf+(j*128),
-										 65,
+										 key_len,
 										 vxcp->vxc_bnctx);
 							vxcp->vxc_delta++;
 							vxcp->vc_combined_compressed = 0;
-							hash_len = 65;
 						}else{
+							key_len = 33;
 							len = struct_EC_POINT_point2oct(pgroup, ppnt[(i-ptarraysize)+j],
 										 POINT_CONVERSION_COMPRESSED,
 										 eckey_buf+(j*128),
-										 33,
+										 key_len,
 										 vxcp->vxc_bnctx);
 
 							vxcp->vc_combined_compressed = 1;
 							vxcp->vxc_delta++;
-							hash_len = 33;
 						}
 						break;
 					}
+				hash_len = key_len;
 				if (vcp->vc_format == VCF_SCRIPT){
-					hash_len=hash_len+4;
+					if (vcp->vc_multisignhashlen !=0){
+						hash_len = vcp->vc_multisignhashlen+key_len+3;
+					}else{
+						hash_len=hash_len+4;
+					}
 				}
 
 			}
 
 #ifndef AVX1SUPPORT
-			for (j=0; j< step;j++){
-				SHA256(hash_buf+(j*128), hash_len, hash1+(j*32));
+			if (vcp->vc_multisignhashlen !=0){
+				memcpy(&hash1,&prehash,32*4);
+				for (j=0; j< step;j++){
+					sha256_finish(hash1,hash_buf+(j*128), hash_len,0);
+				}
+			}else{
+				for (j=0; j< step;j++){
+					SHA256(hash_buf+(j*128), hash_len, hash1+(j*32));
+				}
 			}
 #else
 			for (j=0; j< step;j++){
 				// hash_len is 65 or 69 length, so for SHA256 always two chunks
 				// so the SHA prepare is here; add "1" and length are inserted in the buffer
-				if (vxcp->vc_combined_compressed){
+				// ToDo: need another check on the amount of data to hash
+				// ToDo: with multi sign the data to has could even exceed 128
+				if (hash_len - hash_offset < 64){
+//				if (vxcp->vc_combined_compressed){
 					// compressed hash-len is 33 only one chunk.
-					hash_buf[hash_len+(j*128)]= 0x80;
+					hash_buf[hash_len-hash_offset+(j*128)]= 0x80;
 					sha256lenPtr[14+j*32] = (hash_len >> 29);
 					sha256lenPtr[15+j*32] =	hash_len << 3;
 				}else{
-					hash_buf[hash_len+(j*128)]= 0x80;
+					hash_buf[hash_len-hash_offset+(j*128)]= 0x80;
 					sha256lenPtr[30+j*32] = (hash_len >> 29);
 					sha256lenPtr[31+j*32] =	hash_len << 3;
 				}
@@ -337,17 +420,21 @@ vg_thread_loop(void *arg)
 			// Big/small endian recoding
 			// don't use 32, the last two positions hold the length, already formatted correctly.
 			// since the buffer also contains 0's minimal = 18 (69/4)+1, big endians of 0 are still 0
-			if (vxcp->vc_combined_compressed)
+			// ToDo: need another check on the amount of data to hash
+//			if (vxcp->vc_combined_compressed)
+			if (hash_len - hash_offset < 64)
 				MM_beRecode((__m128i*)hash_buf_transpose,14);
 			else
 				MM_beRecode((__m128i*)hash_buf_transpose,30);
-			// init the hash
-			MM_sha256_init((uint32_t*)hash1);
+			// init the hash by copying the prehash.
+			MM_matrix_transpose_r2c((__m128i*)prehash,(__m128i*)hash1, 4, 8);
+//			MM_sha256_init((uint32_t*)hash1);
 			// run transform first chunk
 			MM_sha256_transform((__m128i*)hash1, (__m128i*)hash_buf_transpose);
 			// run transform 2nd chunk
-			if (!(vxcp->vc_combined_compressed))
-					MM_sha256_transform((__m128i*)hash1, (__m128i*)(hash_buf_transpose+256));
+			// ToDo: need another check on the amount of data to hash
+			if (!(hash_len - hash_offset < 64))
+				MM_sha256_transform((__m128i*)hash1, (__m128i*)(hash_buf_transpose+256));
 			// Big/small endian recoding
 			MM_beRecode((__m128i*)hash1,16);
 
@@ -465,6 +552,7 @@ start_threads(vg_context_t *vcp, int nthreads)
 
 	if (vcp->vc_verbose > 1) {
 		fprintf(stderr, "Using %d worker thread(s)\n", nthreads);
+		fflush(stderr);
 	}
 
 	while (--nthreads) {
@@ -503,7 +591,9 @@ usage(const char *name)
 "-T            Generate bitcoin testnet address\n"
 "-X <version>  Generate address with the given version\n"
 "-p <privtyp>  The priv-type belonging to the version, default <version>+128\n"
-"-F <format>   Generate address with the given format (pubkey, compressed, combined, script, scriptcompressed)\n"
+"-F <format>   Generate address with the given format (pubkey, compressed, combined\n"
+"-M <sig>      create a multi-sign P2SH address requiring <sig> signatures\n"
+"-j <JSON>     JSON array containing the additional keys for the multi-signing\n"
 "-P <pubkey>   Specify base public key for piecewise key generation\n"
 "-e            Encrypt private keys, prompt for password\n"
 "-E <password> Encrypt private keys with <password> (UNSAFE)\n"
@@ -535,8 +625,13 @@ main(int argc, char **argv)
 	int opt;
 	char *seedfile = NULL;
 	char pwbuf[128];
+	char p2shbuf[1024];
 	const char *result_file = NULL;
 	const char *key_password = NULL;
+// signatures and key variables for multi signature support.
+	int nr_signatures;
+	const char *key_list = NULL;
+//
 	char **patterns;
 	int npatterns = 0;
 	int nthreads = 0;
@@ -549,9 +644,13 @@ main(int argc, char **argv)
 	int pattstdin = 0;
 	int compressed = 0; // make use of this switch to combine compresses with uncompressed
 	int newprivtype, privtypeoverride = 0;
+	json_value		    *JSon_input=NULL;
+	int res;
+	int loc;
+	int len;
 	int i;
 
-	while ((opt = getopt(argc, argv, "Lvqnrik1eE:P:NTX:F:t:h?f:o:s:p:")) != -1) {
+	while ((opt = getopt(argc, argv, "Lvqnrik1eE:P:NTX:F:t:h?f:o:s:p:M:j:")) != -1) {
 		switch (opt) {
 		case 'c':
 		        compressed = 1;
@@ -570,6 +669,13 @@ main(int argc, char **argv)
 			break;
 		case 'i':
 			caseinsensitive = 1;
+			break;
+		case 'j':
+			JSon_input = json_parse(optarg, strlen(optarg));
+			if (!JSon_input){
+				fprintf(stderr,
+					"WARNING: Invalid Json input\n");
+			}
 			break;
 		case 'k':
 			remove_on_match = 0;
@@ -602,25 +708,14 @@ main(int argc, char **argv)
 			privtypeoverride = 1;
 			break;
 		case 'F':
-			if (!strcmp(optarg, "scriptcompressed")){
-				format = VCF_SCRIPT;
-				compressed = 1;
-			}
-			else if (!strcmp(optarg, "script")){
-				format = VCF_SCRIPT;
-				compressed = 0;
-			}
-            else
-              if (!strcmp(optarg, "compressed"))
-                 compressed = 1;
-              else
-            	  if (!strcmp(optarg, "combined"))
-            		  compressed = 2;
-            	  else
-            		  if (strcmp(optarg, "pubkey")) {
-            			  fprintf(stderr,  "Invalid format '%s'\n", optarg);
-            			  return 1;
-            		  }
+            if (!strcmp(optarg, "compressed"))
+               compressed = 1;
+            else if (!strcmp(optarg, "combined"))
+                   compressed = 2;
+            	 else if (strcmp(optarg, "pubkey")) {
+            		fprintf(stderr,  "Invalid format '%s'\n", optarg);
+            		return 1;
+            	  }
 			break;
 		case 'P': {
 			if (pubkey_base != NULL) {
@@ -646,6 +741,10 @@ main(int argc, char **argv)
 			break;
 		case 'E':
 			key_password = optarg;
+			break;
+		case 'M': // multi signature and script support
+			format = VCF_SCRIPT;
+			nr_signatures = atoi(optarg);
 			break;
 		case 't':
 			nthreads = atoi(optarg);
@@ -715,6 +814,7 @@ main(int argc, char **argv)
 	}
 #endif
 
+
 	if (caseinsensitive && regex)
 		fprintf(stderr,
 			"WARNING: case insensitive mode incompatible with "
@@ -771,6 +871,52 @@ main(int argc, char **argv)
 
 	vcp->vc_output_match = vg_output_match_console;
 	vcp->vc_output_timing = vg_output_timing_console;
+	vcp->vc_multisignhashlen = 0;
+	vcp->vc_nrkeys = 0;
+	vcp->vc_signkeys = nr_signatures;
+
+	// verify the given keys are on the elliptic curve.
+	if	(JSon_input){
+		vcp->vc_p2shbuf = (unsigned char *)&p2shbuf;
+		EC_KEY *pkeyx = EC_KEY_new_by_curve_name(NID_secp256k1);
+		EC_POINT *pub_basex = NULL;
+
+		vcp->vc_multisignhashlen = 1; // one byte reseved for the p2sh hash
+
+		vcp->vc_nrkeys = JSon_input->u.array.length;
+		for (i=0; i< JSon_input->u.array.length; i++){
+			pub_basex = EC_POINT_hex2point(EC_KEY_get0_group(pkeyx),
+					(const char *)json_string_value(JSon_input->u.array.values[i]),
+					NULL, NULL);
+			if (pub_basex){
+				res = strlen(json_string_value(JSon_input->u.array.values[i]));
+				if (res==33*2){
+					res = EC_POINT_point2oct(EC_KEY_get0_group(pkeyx), pub_basex,
+											 POINT_CONVERSION_COMPRESSED,
+											 vcp->vc_p2shbuf+vcp->vc_multisignhashlen+1, 33, NULL);
+				}else{
+					res = EC_POINT_point2oct(EC_KEY_get0_group(pkeyx), pub_basex,
+											 POINT_CONVERSION_UNCOMPRESSED,
+											 vcp->vc_p2shbuf+vcp->vc_multisignhashlen+1, 65, NULL);
+				}
+				vcp->vc_p2shbuf[vcp->vc_multisignhashlen++] = res;
+				vcp->vc_multisignhashlen = vcp->vc_multisignhashlen + res;
+
+			}else{
+				fprintf(stderr, "#%d pub key is invalid\n\t", vcp->vc_nrkeys);
+				vcp->vc_multisignhashlen = 0;
+				i = vcp->vc_nrkeys;
+			}
+		}
+		EC_POINT_free(pub_basex);
+		EC_KEY_free(pkeyx);
+		json_value_free(JSon_input);
+	}
+	if (vcp->vc_nrkeys > 0){
+		if (vcp->vc_multisignhashlen == 0)
+				return 1;
+	}
+	fflush(stderr);
 
 	if (!npattfp) {
 		if (optind >= argc) {
@@ -780,11 +926,10 @@ main(int argc, char **argv)
 		patterns = &argv[optind];
 
 		npatterns = argc - optind;
-
 		if (!vg_context_add_patterns(vcp,
 					     (const char ** const) patterns,
 					     npatterns))
-		return 1;
+			return 1;
 	}
 
 	for (i = 0; i < npattfp; i++) {

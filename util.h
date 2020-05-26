@@ -40,7 +40,16 @@ extern void vg_encode_address(const EC_POINT *ppoint, const EC_GROUP *pgroup,
 			      int addrtype, char *result);
 extern void vg_encode_address_compressed(const EC_POINT *ppoint, const EC_GROUP *pgroup,
 			      int addrtype, char *result);
+extern void vg_encode_p2sh(unsigned char *redeemscript, int lenght, int addrtype, char *result);
+
+extern void vg_encode_multiscript_address (const EC_POINT *ppoint, const EC_GROUP *pgroup,
+			 int addrtype, int compressed, char *result,
+			 int prehashlen, int nrsignkeys, int nrkeys, char* script);
+
 extern void vg_encode_script_address(const EC_POINT *ppoint,
+				     const EC_GROUP *pgroup,
+				     int addrtype, int compressed, char *result);
+extern void vg_encode_script_address_segwit(const EC_POINT *ppoint,
 				     const EC_GROUP *pgroup,
 				     int addrtype, int compressed, char *result);
 extern void vg_encode_privkey(const EC_KEY *pkey, int addrtype, char *result);

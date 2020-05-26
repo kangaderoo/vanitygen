@@ -544,11 +544,23 @@ vg_output_match_console(vg_context_t *vcp, vg_exec_context_t *vxcp, const char *
 				  EC_KEY_get0_group(pkey),
 				  vcp->vc_pubkeytype, addr_buf);
 	if (isscript)
-		vg_encode_script_address(ppnt,
+		if (vcp->vc_multisignhashlen==0)
+			vg_encode_script_address(ppnt,
+//		vg_encode_script_address_segwit(ppnt,
 					 EC_KEY_get0_group(pkey),
 					 vcp->vc_addrtype,
 					 (vxcp->vc_combined_compressed)? 1:0,
 					 addr2_buf);
+		else
+			vg_encode_multiscript_address(ppnt,
+					 EC_KEY_get0_group(pkey),
+					 vcp->vc_addrtype,
+					 (vxcp->vc_combined_compressed)? 1:0,
+					 addr2_buf,
+					 vcp->vc_multisignhashlen,
+					 vcp->vc_signkeys,
+					 vcp->vc_nrkeys,
+					 vcp->vc_p2shbuf);
 
 	if (vcp->vc_key_protect_pass) {
 		len = vg_protect_encode_privkey(privkey_buf,
@@ -578,17 +590,26 @@ vg_output_match_console(vg_context_t *vcp, vg_exec_context_t *vxcp, const char *
 	if (vcp->vc_verbose > 0) {
 		if (vcp->vc_verbose > 1) {
 			pend = key_buf;
-			len = i2o_ECPublicKey(pkey, &pend);
-			printf("Pubkey (hex): ");
-			dumphex(key_buf, len);
-			printf("Privkey (hex): ");
+			if (vxcp->vc_combined_compressed){
+				len = EC_POINT_point2oct(EC_KEY_get0_group(pkey), EC_KEY_get0_public_key(pkey),
+												 POINT_CONVERSION_COMPRESSED,
+												 pend, 33, NULL);
+
+				printf("Pubkey Compressed (hex): \n\t");
+				dumphex(key_buf, len);
+			}else{
+				len = i2o_ECPublicKey(pkey, &pend);
+				printf("Pubkey (hex): : \n\t");
+				dumphex(key_buf, len);
+			}
+			printf("Privkey (hex): : \n\t");
 			dumpbn(EC_KEY_get0_private_key(pkey));
 			pend = key_buf;
 			len = i2d_ECPrivateKey(pkey, &pend);
 			printf("Privkey (ASN1): ");
 			dumphex(key_buf, len);
 		}
-
+		fflush(stderr);
 	}
 
 	if (!vcp->vc_result_file || (vcp->vc_verbose > 0)) {
@@ -1412,6 +1433,7 @@ vg_prefix_context_add_patterns(vg_context_t *vcp,
 			fprintf(stderr,
 				"Prefix difficulty: %20s %s\n",
 				dbuf, patterns[i]);
+			fflush(stderr);
 			OPENSSL_free(dbuf);
 		}
 	}

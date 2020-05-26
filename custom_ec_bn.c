@@ -277,7 +277,7 @@ void struct_BN_mul(_sidm_bn_context_t *calc_context_r, _sidm_bn_context_t *calc_
 							  30,29,28,27,26,25,24,
 							  38,37,36,35,34,33,32,
 							  46,45,44,43,32,41,40};
-	uint32_t i, j, cmp, start;
+	uint32_t i, /*j,*/ cmp, start;
 	start = 0; // don't shift an empty buffer;
 	for (i=0;i<32;i++){
 		cmp = 0x80;
@@ -285,7 +285,7 @@ void struct_BN_mul(_sidm_bn_context_t *calc_context_r, _sidm_bn_context_t *calc_
 			if (context[msb_order[i]] && cmp){
 				//add
 				struct_BN_shl(&buffer, &buffer);
-				struct_BN_add(&buffer, &buffer, var_a);
+				struct_BN_add(&buffer, &buffer, (_sidm_bn_context_t*)var_a);
 				start = 1;
 			}else{
 				//shift

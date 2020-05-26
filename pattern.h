@@ -54,25 +54,24 @@ typedef void *(*vg_exec_context_threadfunc_t)(vg_exec_context_t *);
 
 /* Context of one pattern-matching unit within the process */
 struct _vg_exec_context_s {
-	vg_context_t			*vxc_vc;
+	vg_context_t		*vxc_vc;
 	BN_CTX				*vxc_bnctx;
 	EC_KEY				*vxc_key;
-	int				vxc_delta;
-    int         vc_combined_compressed;
-	unsigned char			vxc_binres[28];
+	int					vxc_delta;
+    int         		vc_combined_compressed;
+	unsigned char		vxc_binres[28];
 	BIGNUM				*vxc_bntarg;
 	BIGNUM				*vxc_bnbase;
 	BIGNUM				*vxc_bntmp;
 	BIGNUM				*vxc_bntmp2;
-
 	vg_exec_context_threadfunc_t	vxc_threadfunc;
 	pthread_t			vxc_pthread;
-	int				vxc_thread_active;
+	int					vxc_thread_active;
 
 	/* Thread synchronization */
 	struct _vg_exec_context_s	*vxc_next;
-	int				vxc_lockmode;
-	int				vxc_stop;
+	int					vxc_lockmode;
+	int					vxc_stop;
 };
 
 
@@ -117,6 +116,12 @@ struct _vg_context_s {
 	EC_POINT		*vc_pubkey_base;
 	int			vc_halt;
 
+	/* p2sh multi signature */
+	int					vc_nrkeys;
+	char 				*vc_p2shbuf;
+	int					vc_signkeys;
+	int					vc_multisignhashlen;
+
 	vg_exec_context_t	*vc_threads;
 	int			vc_thread_excl;
 
@@ -137,6 +142,7 @@ struct _vg_context_s {
 	vg_output_error_func_t		vc_output_error;
 	vg_output_match_func_t		vc_output_match;
 	vg_output_timing_func_t		vc_output_timing;
+
 };
 
 
