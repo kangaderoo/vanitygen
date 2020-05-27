@@ -1,6 +1,6 @@
 LIBS=-lpcre -lcrypto -lm -lpthread
 CFLAGS=-std=c99 -ggdb -O3 -Wall -march=native
-OBJS=vanitygen.o oclvanitygen.o oclvanityminer.o oclengine.o keyconv.o pattern.o util.o rmd160.o sha256.o custom_ec_bn.o json.o segwit_addr.o
+OBJS=vanitygen.o oclvanitygen.o oclvanityminer.o oclengine.o keyconv.o pattern.o util.o rmd160.o sha256.o custom_ec_bn.o winglue.o json.o segwit_addr.o
 #PROGS=vanitygen keyconv oclvanitygen oclvanityminer
 PROGS=vanitygen 
 
@@ -17,16 +17,16 @@ most: vanitygen keyconv
 
 all: $(PROGS)
 
-vanitygen: vanitygen.o pattern.o util.o rmd160.o sha256.o custom_ec_bn.o json.o segwit_addr.o
+vanitygen: vanitygen.o pattern.o util.o rmd160.o sha256.o custom_ec_bn.o winglue.o json.o segwit_addr.o
 	$(CC) $^ -o $@ $(CFLAGS) $(LIBS)
 
-oclvanitygen: oclvanitygen.o oclengine.o pattern.o util.o json.o segwit_addr.o
+oclvanitygen: oclvanitygen.o oclengine.o pattern.o util.o winglue.o json.o segwit_addr.o
 	$(CC) $^ -o $@ $(CFLAGS) $(LIBS) $(OPENCL_LIBS)
 
-oclvanityminer: oclvanityminer.o oclengine.o pattern.o util.o json.o segwit_addr.o
+oclvanityminer: oclvanityminer.o oclengine.o pattern.o util.o winglue.o json.o segwit_addr.o
 	$(CC) $^ -o $@ $(CFLAGS) $(LIBS) $(OPENCL_LIBS) -lcurl
 
-keyconv: keyconv.o util.o json.o segwit_addr.o
+keyconv: keyconv.o util.o winglue.o json.o segwit_addr.o
 	$(CC) $^ -o $@ $(CFLAGS) $(LIBS)
 
 clean:

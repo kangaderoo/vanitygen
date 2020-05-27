@@ -1,0 +1,90 @@
+Additional information in how to generate P2SH addresses.
+The P2SH (Pay to Script Hash) addresses are the hash digest of a script.
+One use of script is to create a multi signature address.
+
+For smart contracts, company wide wallets were multiple people are allowed to make
+transactions and various other usages a M of N P2SH script address is helpfull.
+
+The original Vanitygen code contained a setting to generate an script address, but
+the code was limited to generate a 1 signature out of 1 keys script vanity adress.
+
+Extending this code this version of vanitygen can now generate configurable  
+M out of N vanity script adresses, while still containing the old functionality.
+
+=========================================================
+
+Create script (single sign/single key) adresses:
+
+$ ./vanitygen.exe -M 1 3Love
+Pattern: 3Love
+P2SHAddress: 3LoveS4t1KgXsy7bDCmE9XPqNvohp31tTr
+Address: 1GFZNVfJrt9AhocyczoiqH7oS16dWbwxUZ
+Privkey: 5Jw6i6H4MuPiF4pynyQeUaVqPKyG9reLMgLhPTqAWYvSWpL2yNN
+Difficulty: 4553521
+
+Create script (single sign/single compressedkey) adresses:
+$ ./vanitygen.exe -M 1 -F compressed 3Love
+Pattern: 3Love
+P2SHAddress: 3LovebomPYHiRKjp8tQN5FTgeDi8Zc2hTD
+Address: 16zwar81GU9m9yDvuxfeNwLqW3pKciXhUG
+Privkey: KwFxnLSE7LkEaX9crV9Xb16E2qysRzyndsBFkvWwpabPENsN724n
+Difficulty: 4553521
+
+=========================================================
+
+Pubkey Compressed (hex):
+        02a3fdb80c5da1ceb4da75e56c900da9baf2dfde0a2d2efbf81387e5ab2e91e985
+Address Compressed (P2PKH):
+        1Q9U3bchykTsm5Ri4ZgJsgcYiBWPUSM3zE
+
+---------------------------------------------------------
+
+Pubkey Compressed (hex):
+        03d2c632fa06281b97eba0475de8e6e4597bc19b1ce0edfb36ad889141137f7dc3
+Address Compressed (P2PKH):
+        1BU2z1UTxmtVTrCsRWTnKuXpWXtvh9gDH3
+
+---------------------------------------------------------
+
+./vanitygen.exe -M 2 -X 5 -j [\"02a3fdb80c5da1ceb4da75e56c900da9baf2dfde0a2d2efbf81387e5ab2e91e985\",\"03d2c632fa06281b97eba0475de8e6e4597bc19b1ce0edfb36ad889141137f7dc3\"] -v -i -F compressed 3P14159
+
+-M <M>                 	--> script address needing M signatures
+-X <scriptaddresstype> 	--> 5 is for bitcoin adresses starting with 3, other values could be used for altcoints
+-j [\"pubkey1\",\"pubkey2\",....,\"pubkeyN\"]	
+						--> list of keys, one key will be added by the vanitygen search to complete N keys
+-v						--> verbose
+-i						--> ignore case
+-F						--> public key type, combined will not work with p2sh address generation
+
+Pattern: 3P14159
+Pubkey Compressed (hex):
+        0279600e5939f4f7baace27acefcc6191f260d23d30da8c779bc557c50eaf01751
+Address Compressed (P2PKH):
+        1BU2z1UTxmtVTrCsRWTnKuXpWXtvh9gDH3
+
+Address (P2SH):
+
+	3P14159mYzQdm5eozWLMBkaMJMxzQKu7am
+---------------------------------------------------------
+
+./keyconv -M 2 -X 5 -C -j  [\"02a3fdb80c5da1ceb4da75e56c900da9baf2dfde0a2d2efbf81387e5ab2e91e985\",\"03d2c632fa06281b97eba0475de8e6e4597bc19b1ce0edfb36ad889141137f7dc3\",\"0279600e5939f4f7baace27acefcc6191f260d23d30da8c779bc557c50eaf01751\"]
+./keyconv -M 2 -X 5 -C -j  [\"02a3fdb80c5da1ceb4da75e56c900da9baf2dfde0a2d2efbf81387e5ab2e91e985\",\"03d2c632fa06281b97eba0475de8e6e4597bc19b1ce0edfb36ad889141137f7dc3\"] <PrivKey>
+
+
+P2SH (hex):
+        522102a3fdb80c5da1ceb4da75e56c900da9baf2dfde0a2d2efbf81387e5ab2e91e9852103d2c632fa06281b97eba0475de8e6e4597bc19b1ce0edfb36ad889141137f7dc3210279600e5939f4f7baace27acefcc6191f260d23d30da8c779bc557c50eaf0175153ae
+P2SH address:
+        3P14159mYzQdm5eozWLMBkaMJMxzQKu7am
+
+---------------------------------------------------------
+
+In Bitcoin-qt console:
+
+createmultisig 2 "[\"02a3fdb80c5da1ceb4da75e56c900da9baf2dfde0a2d2efbf81387e5ab2e91e985\",\"03d2c632fa06281b97eba0475de8e6e4597bc19b1ce0edfb36ad889141137f7dc3\",\"0279600e5939f4f7baace27acefcc6191f260d23d30da8c779bc557c50eaf01751\"]"
+
+  "address": "3P14159mYzQdm5eozWLMBkaMJMxzQKu7am",
+  "redeemScript": "522102a3fdb80c5da1ceb4da75e56c900da9baf2dfde0a2d2efbf81387e5ab2e91e9852103d2c632fa06281b97eba0475de8e6e4597bc19b1ce0edfb36ad889141137f7dc3210279600e5939f4f7baace27acefcc6191f260d23d30da8c779bc557c50eaf0175153ae"
+
+---------------------------------------------------------
+
+

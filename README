@@ -51,21 +51,3 @@ Sipa's showwallet branch has a new command called "importprivkey" that
 accepts the base-58 encoded private key.  Vanitygen has been tested to 
 work with that version of bitcoin.
 
-Create script (single sign/single key) adresses:
-
-$ ./vanitygen.exe -F script 3Love
-Pattern: 3Love
-P2SHAddress: 3LoveS4t1KgXsy7bDCmE9XPqNvohp31tTr
-Address: 1GFZNVfJrt9AhocyczoiqH7oS16dWbwxUZ
-Privkey: 5Jw6i6H4MuPiF4pynyQeUaVqPKyG9reLMgLhPTqAWYvSWpL2yNN
-Difficulty: 4553521
-
-Create script (single sign/single compressedkey) adresses:
-$ ./vanitygen.exe -F scriptcompressed 3Love
-Pattern: 3Love
-P2SHAddress: 3LovebomPYHiRKjp8tQN5FTgeDi8Zc2hTD
-Address: 16zwar81GU9m9yDvuxfeNwLqW3pKciXhUG
-Privkey: KwFxnLSE7LkEaX9crV9Xb16E2qysRzyndsBFkvWwpabPENsN724n
-Difficulty: 4553521
-
-
